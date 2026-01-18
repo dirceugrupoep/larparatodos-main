@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Lar Para Todos - Mature & Sophisticated Design */
+    --background: 40 20% 97%;
+    --foreground: 220 25% 18%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 18%;
+
+    /* Terracotta - Primary (Warmth, Earth, Trust) */
+    --primary: 18 65% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Bronze/Gold - Secondary */
+    --secondary: 38 70% 50%;
+    --secondary-foreground: 220 25% 15%;
+
+    /* Warm Sand */
+    --muted: 35 25% 92%;
+    --muted-foreground: 220 15% 45%;
+
+    /* Forest Green Accent (Stability, Growth) */
+    --accent: 155 45% 38%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 35 20% 85%;
+    --input: 35 20% 90%;
+    --ring: 18 65% 48%;
+
+    --radius: 0.75rem;
+
+    /* Custom sophisticated colors */
+    --terracotta: 18 65% 48%;
+    --terracotta-dark: 15 60% 40%;
+    --terracotta-light: 22 55% 58%;
+    --bronze: 38 70% 50%;
+    --bronze-light: 42 60% 62%;
+    --forest: 155 45% 38%;
+    --forest-dark: 155 50% 28%;
+    --olive: 75 30% 42%;
+    --clay: 25 35% 58%;
+    --charcoal: 220 25% 18%;
+
+    /* Sophisticated Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(18 65% 48%), hsl(38 70% 50%));
+    --gradient-hero: linear-gradient(135deg, hsl(18 65% 48%) 0%, hsl(25 50% 52%) 50%, hsl(38 70% 50%) 100%);
+    --gradient-warm: linear-gradient(180deg, hsl(40 25% 96%) 0%, hsl(35 30% 93%) 100%);
+    --gradient-earth: linear-gradient(135deg, hsl(155 45% 38%), hsl(75 30% 42%));
+    --gradient-sunset: linear-gradient(135deg, hsl(18 65% 48%), hsl(8 55% 45%));
+
+    /* Elegant Shadows */
+    --shadow-sm: 0 2px 8px -2px hsl(220 25% 18% / 0.08);
+    --shadow-md: 0 8px 24px -8px hsl(220 25% 18% / 0.12);
+    --shadow-lg: 0 16px 48px -12px hsl(220 25% 18% / 0.15);
+    --shadow-glow: 0 0 40px hsl(18 65% 48% / 0.25);
+    --shadow-bronze: 0 8px 32px -8px hsl(38 70% 50% / 0.3);
+
+    /* Material Design Colors - Vibrant & Modern */
+    --md-primary: 217 91% 60%;
+    --md-primary-dark: 217 91% 50%;
+    --md-primary-light: 217 91% 70%;
+    --md-secondary: 262 83% 58%;
+    --md-success: 142 76% 36%;
+    --md-warning: 38 92% 50%;
+    --md-error: 0 84% 60%;
+    --md-info: 199 89% 48%;
+
+    /* Vibrant Gradients */
+    --gradient-vibrant: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --gradient-sunset-vibrant: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    --gradient-ocean: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    --gradient-forest-vibrant: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    --gradient-fire: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    --gradient-purple-pink: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+    --gradient-blue-purple: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --gradient-material: linear-gradient(135deg, #2196F3 0%, #21CBF3 100%);
+  }
+
+  .dark {
+    --background: 220 25% 10%;
+    --foreground: 40 20% 94%;
+
+    --card: 220 22% 14%;
+    --card-foreground: 40 20% 94%;
+
+    --popover: 220 22% 14%;
+    --popover-foreground: 40 20% 94%;
+
+    --primary: 18 60% 55%;
+    --primary-foreground: 220 25% 10%;
+
+    --secondary: 38 65% 55%;
+    --secondary-foreground: 220 25% 10%;
+
+    --muted: 220 20% 20%;
+    --muted-foreground: 40 30% 65%;
+
+    --accent: 155 40% 45%;
+    --accent-foreground: 220 25% 10%;
+
+    --destructive: 0 55% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 20% 22%;
+    --input: 220 20% 22%;
+    --ring: 18 60% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,0 +1,21 @@
+# Dockerfile de produção para o Backend
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copiar arquivos de dependências
+COPY package*.json ./
+
+# Instalar apenas dependências de produção
+RUN npm ci --only=production
+
+# Copiar código fonte
+COPY . .
+
+# Expor porta
+EXPOSE 3000
+
+# Comando para iniciar
+# Primeiro executa migrations e seed, depois inicia o servidor
+CMD ["sh", "-c", "npm run migrate && npm run seed && npm start"]
+
