@@ -36,3 +36,9 @@ minio_data/
 # Backups
 *.sql
 backups/
+
+# Development files (não usar em produção)
+docker-compose.yml
+docker-compose.override.yml
+Dockerfile
+nginx.conf
