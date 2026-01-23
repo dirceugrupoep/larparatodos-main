@@ -28,7 +28,7 @@ S3_REGION=us-east-1
 S3_USE_SSL=false
 
 # Ciabra Invoice API
-CIABRA_API_URL=https://api.ciabra.com.br
+CIABRA_API_URL=https://api.az.center
 CIABRA_CLIENT_ID=
 CIABRA_CLIENT_SECRET=
 CIABRA_WEBHOOK_SECRET=

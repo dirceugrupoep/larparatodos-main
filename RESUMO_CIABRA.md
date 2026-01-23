@@ -47,7 +47,7 @@ Adicione estas variáveis:
 
 ```env
 # Ciabra Invoice API
-CIABRA_API_URL=https://api.ciabra.com.br
+CIABRA_API_URL=https://api.az.center
 CIABRA_CLIENT_ID=seu_client_id
 CIABRA_CLIENT_SECRET=seu_client_secret
 CIABRA_WEBHOOK_SECRET=seu_webhook_secret
