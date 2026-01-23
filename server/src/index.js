@@ -36,12 +36,28 @@ app.use(helmet({
 }));
 
 // Security: Rate limiting
+// IMPORTANTE: Com trust proxy, precisamos usar keyGenerator customizado
+// e desabilitar a validação automática do trustProxy
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 100, // máximo 100 requests por IP
   message: 'Muitas requisições deste IP, tente novamente mais tarde.',
   standardHeaders: true,
   legacyHeaders: false,
+  // Desabilitar validação automática do trustProxy (estamos usando keyGenerator customizado)
+  validate: {
+    trustProxy: false,
+  },
+  // Usar o IP real do cliente quando atrás de proxy
+  keyGenerator: (req) => {
+    // Se tiver X-Forwarded-For, usar o primeiro IP (cliente real)
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+      const ips = forwarded.split(',').map(ip => ip.trim());
+      return ips[0] || req.ip;
+    }
+    return req.ip;
+  },
 });
 
 const authLimiter = rateLimit({
@@ -49,6 +65,19 @@ const authLimiter = rateLimit({
   max: 5, // máximo 5 tentativas de login/cadastro
   message: 'Muitas tentativas de autenticação. Tente novamente em 15 minutos.',
   skipSuccessfulRequests: true,
+  // Desabilitar validação automática do trustProxy
+  validate: {
+    trustProxy: false,
+  },
+  // Mesma lógica para auth
+  keyGenerator: (req) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+      const ips = forwarded.split(',').map(ip => ip.trim());
+      return ips[0] || req.ip;
+    }
+    return req.ip;
+  },
 });
 
 // Aplicar rate limiting geral

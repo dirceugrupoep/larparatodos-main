@@ -5,7 +5,6 @@ Sistema completo para gestão de cooperativas habitacionais, desenvolvido com Re
 ## 📚 Documentação
 
 - **[DEPLOY.md](DEPLOY.md)** - Guia completo de deploy no servidor (Bravulink ou qualquer servidor com Docker)
-- **[DOCUMENTACAO.md](DOCUMENTACAO.md)** - Documentação técnica completa do sistema
 - **[GUIA_RAPIDO.md](GUIA_RAPIDO.md)** - Guia rápido de referência
 
 ## ⚡ Quick Start
@@ -204,8 +203,8 @@ Proprietário - Todos os direitos reservados.
 
 Para dúvidas ou suporte:
 - Email: suporte@larparatodos.com.br
-- Documentação: [DOCUMENTACAO.md](DOCUMENTACAO.md)
-- Deploy: [DEPLOY.md](DEPLOY.md)
+- Guia de Deploy: [DEPLOY.md](DEPLOY.md)
+- Guia Rápido: [GUIA_RAPIDO.md](GUIA_RAPIDO.md)
 
 ---
 

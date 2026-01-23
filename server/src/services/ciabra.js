@@ -128,7 +128,13 @@ export async function createInvoice(invoiceData) {
       dueDate: invoiceData.dueDate, // ISO 8601 format
       installmentCount: 1,
       invoiceType: 'SINGLE',
-      items: [], // Array vazio por enquanto
+      items: [
+        {
+          description: invoiceData.description || 'Contribuição mensal - Larparatodos',
+          quantity: 1,
+          price: invoiceData.price, // Valor em reais (não centavos)
+        }
+      ],
       price: invoiceData.price, // Valor em reais (não centavos)
       externalId: invoiceData.externalId?.toString() || undefined,
       paymentTypes: invoiceData.paymentTypes || ['PIX'], // ['PIX'] ou ['BOLETO'] ou ['PIX', 'BOLETO']
@@ -156,6 +162,7 @@ export async function createInvoice(invoiceData) {
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
     console.log(`📤 Criando invoice no Ciabra para cliente ${invoiceData.customerId}`);
+    console.log(`📋 Payload enviado:`, JSON.stringify(payload, null, 2));
 
     const response = await fetch(`${CIABRA_API_URL}/invoices/applications/invoices`, {
       method: 'POST',
@@ -168,9 +175,17 @@ export async function createInvoice(invoiceData) {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error('Erro ao criar invoice no Ciabra:', error);
-      throw new Error(`Erro ao criar invoice: ${error}`);
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = errorText;
+      }
+      console.error('❌ Erro ao criar invoice no Ciabra:', errorData);
+      console.error('📋 Status:', response.status, response.statusText);
+      console.error('📋 Headers:', Object.fromEntries(response.headers.entries()));
+      throw new Error(`Erro ao criar invoice: ${JSON.stringify(errorData)}`);
     }
 
     const data = await response.json();
