@@ -5,7 +5,6 @@ dotenv.config();
 const CIABRA_API_URL = process.env.CIABRA_API_URL || 'https://api.ciabra.com.br';
 const CIABRA_CLIENT_ID = process.env.CIABRA_CLIENT_ID;
 const CIABRA_CLIENT_SECRET = process.env.CIABRA_CLIENT_SECRET;
-const CIABRA_WEBHOOK_SECRET = process.env.CIABRA_WEBHOOK_SECRET;
 
 let accessToken = null;
 let tokenExpiresAt = null;
@@ -148,18 +147,18 @@ export async function getChargeStatus(chargeId) {
  * @returns {boolean} Se a assinatura é válida
  */
 export function verifyWebhookSignature(signature, payload) {
-  if (!CIABRA_WEBHOOK_SECRET) {
-    console.warn('CIABRA_WEBHOOK_SECRET não configurado, pulando verificação');
-    return true; // Em desenvolvimento, pode pular
+  // O Ciabra não fornece webhook secret separado
+  // Se houver signature no header, podemos validar no futuro
+  // Por enquanto, aceitar todos os webhooks (em produção, considerar validação adicional)
+  if (signature) {
+    console.log('📨 Webhook recebido com assinatura:', signature.substring(0, 20) + '...');
   }
-
-  // Implementar verificação de assinatura conforme documentação do Ciabra
-  // Por enquanto, retornar true (implementar conforme necessário)
-  return true;
+  return true; // Aceitar webhook (implementar validação se necessário no futuro)
 }
 
 /**
  * Processa notificação de webhook do Ciabra
+ * Suporta diferentes formatos de eventos do Ciabra
  * @param {Object} webhookData - Dados do webhook
  * @returns {Object} Dados processados
  */
@@ -170,15 +169,34 @@ export function processWebhook(webhookData) {
     paid: 'paid',
     overdue: 'overdue',
     cancelled: 'cancelled',
+    canceled: 'cancelled',
+    confirmed: 'paid',
+    generated: 'pending',
   };
 
+  // Extrair tipo de evento - o Ciabra pode usar 'event' ou 'type'
+  // Valores possíveis: 'charge.created', 'charge.deleted', 'payment.generated', 'payment.confirmed'
+  // ou em português: 'cobrança.criada', 'cobrança.deletada', 'pagamento.gerado', 'pagamento.confirmado'
+  const eventType = webhookData.event || webhookData.type || 'charge.updated';
+  
+  // Extrair dados da cobrança - o Ciabra pode enviar em diferentes estruturas:
+  // 1. { event: "...", data: { id, status, ... } }
+  // 2. { type: "...", id, status, ... }
+  // 3. { event: "...", charge: { id, status, ... } }
+  const chargeData = webhookData.data || webhookData.charge || webhookData;
+  
+  console.log(`🔍 Identificado evento: ${eventType}`);
+
   return {
-    chargeId: webhookData.id || webhookData.charge_id,
-    status: statusMap[webhookData.status] || webhookData.status,
-    paidAt: webhookData.paid_at || webhookData.paidAt,
-    amount: webhookData.amount ? webhookData.amount / 100 : null, // Converter de centavos
-    pixQrCode: webhookData.pix?.qr_code || webhookData.pix_qr_code,
-    pixQrCodeUrl: webhookData.pix?.qr_code_url || webhookData.pix_qr_code_url,
-    boletoUrl: webhookData.boleto?.url || webhookData.boleto_url,
+    eventType, // Tipo de evento (charge.created, payment.confirmed, etc)
+    chargeId: chargeData.id || chargeData.charge_id || webhookData.id || webhookData.charge_id,
+    status: statusMap[chargeData.status] || statusMap[webhookData.status] || chargeData.status || webhookData.status,
+    paidAt: chargeData.paid_at || chargeData.paidAt || webhookData.paid_at || webhookData.paidAt,
+    amount: chargeData.amount 
+      ? (typeof chargeData.amount === 'number' ? chargeData.amount / 100 : parseFloat(chargeData.amount) / 100)
+      : (webhookData.amount ? (typeof webhookData.amount === 'number' ? webhookData.amount / 100 : parseFloat(webhookData.amount) / 100) : null),
+    pixQrCode: chargeData.pix?.qr_code || chargeData.pix_qr_code || webhookData.pix?.qr_code || webhookData.pix_qr_code,
+    pixQrCodeUrl: chargeData.pix?.qr_code_url || chargeData.pix_qr_code_url || webhookData.pix?.qr_code_url || webhookData.pix_qr_code_url,
+    boletoUrl: chargeData.boleto?.url || chargeData.boleto_url || webhookData.boleto?.url || webhookData.boleto_url,
   };
 }

@@ -13,49 +13,90 @@ router.post('/webhook', express.json(), async (req, res) => {
     const signature = req.headers['x-ciabra-signature'] || req.headers['x-signature'];
     const payload = req.body;
 
-    // Verificar assinatura (se configurado)
-    if (!verifyWebhookSignature(signature, payload)) {
-      console.warn('Webhook com assinatura inválida:', signature);
+    // Log completo do payload recebido para debug
+    console.log('📨 Webhook recebido do Ciabra - Payload completo:', JSON.stringify(payload, null, 2));
+    console.log('📨 Webhook recebido do Ciabra - Resumo:', {
+      event: payload.event || payload.type || 'unknown',
+      chargeId: payload.id || payload.charge_id || payload.data?.id || payload.charge?.id,
+      status: payload.status || payload.data?.status || payload.charge?.status,
+    });
+
+    // Verificar assinatura (opcional - Ciabra pode não enviar)
+    if (signature && !verifyWebhookSignature(signature, payload)) {
+      console.warn('⚠️  Webhook com assinatura inválida:', signature);
       return res.status(401).json({ error: 'Assinatura inválida' });
     }
 
     // Processar webhook
     const webhookData = processWebhook(payload);
-    const { chargeId, status, paidAt, amount, pixQrCode, pixQrCodeUrl, boletoUrl } = webhookData;
+    const { eventType, chargeId, status, paidAt, amount, pixQrCode, pixQrCodeUrl, boletoUrl } = webhookData;
+
+    console.log(`📋 Processando evento: ${eventType}, chargeId: ${chargeId}, status: ${status}`);
+
+    if (!chargeId) {
+      console.warn('⚠️  Webhook sem charge_id:', payload);
+      return res.status(400).json({ error: 'charge_id não encontrado no webhook' });
+    }
 
     // Buscar pagamento pelo charge_id
     const paymentResult = await pool.query(
-      'SELECT id, user_id FROM payments WHERE ciabra_charge_id = $1',
+      'SELECT id, user_id, status FROM payments WHERE ciabra_charge_id = $1',
       [chargeId]
     );
 
     if (paymentResult.rows.length === 0) {
-      console.warn(`Pagamento não encontrado para charge_id: ${chargeId}`);
-      return res.status(404).json({ error: 'Pagamento não encontrado' });
+      console.warn(`⚠️  Pagamento não encontrado para charge_id: ${chargeId} (pode ser teste ou cobrança externa)`);
+      // Retornar 200 para não causar retry do Ciabra
+      return res.status(200).json({ message: 'Pagamento não encontrado (pode ser teste ou cobrança externa)' });
     }
 
     const payment = paymentResult.rows[0];
 
-    // Atualizar status do pagamento
+    // Processar cada tipo de evento especificamente
     const updateData = {
-      status,
       updated_at: new Date(),
     };
 
-    if (status === 'paid' && paidAt) {
-      updateData.paid_date = new Date(paidAt);
+    // Processar baseado no tipo de evento
+    if (eventType.includes('charge.created') || eventType.includes('cobrança.criada')) {
+      // Cobrança criada: Atualizar com dados iniciais (PIX/Boleto)
+      console.log('📦 Evento: Cobrança criada');
+      if (pixQrCode) updateData.ciabra_pix_qr_code = pixQrCode;
+      if (pixQrCodeUrl) updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
+      if (boletoUrl) updateData.ciabra_boleto_url = boletoUrl;
+      if (status) updateData.status = status;
     }
+    else if (eventType.includes('charge.deleted') || eventType.includes('cobrança.deletada')) {
+      // Cobrança deletada: Marcar como cancelado
+      console.log('🗑️  Evento: Cobrança deletada');
+      updateData.status = 'cancelled';
+    }
+    else if (eventType.includes('payment.generated') || eventType.includes('pagamento.gerado')) {
+      // Pagamento gerado: Atualizar QR Code PIX ou URL do boleto
+      console.log('💳 Evento: Pagamento gerado');
+      if (pixQrCode) updateData.ciabra_pix_qr_code = pixQrCode;
+      if (pixQrCodeUrl) updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
+      if (boletoUrl) updateData.ciabra_boleto_url = boletoUrl;
+    }
+    else if (eventType.includes('payment.confirmed') || eventType.includes('pagamento.confirmado') || status === 'paid') {
+      // Pagamento confirmado: Marcar como pago e atualizar data
+      console.log('✅ Evento: Pagamento confirmado');
+      updateData.status = 'paid';
+      if (paidAt) {
+        updateData.paid_date = new Date(paidAt);
+      } else {
+        updateData.paid_date = new Date(); // Se não veio a data, usar agora
+      }
 
-    // Se o pagamento foi marcado como pago, verificar se havia outros vencidos
-    if (status === 'paid') {
       // Verificar se o usuário ainda tem outros pagamentos vencidos
       const overdueCheck = await pool.query(
         `SELECT COUNT(*) as count 
          FROM payments 
          WHERE user_id = $1 
+           AND id != $2
            AND status IN ('pending', 'overdue') 
            AND due_date < CURRENT_DATE`,
-        [payment.user_id]
+        [payment.user_id, payment.id]
       );
 
       // Se não tem mais vencidos, o usuário volta a ser adimplente
@@ -63,15 +104,16 @@ router.post('/webhook', express.json(), async (req, res) => {
         console.log(`✅ Usuário ${payment.user_id} voltou a ser adimplente`);
       }
     }
-
-    if (pixQrCode) {
-      updateData.ciabra_pix_qr_code = pixQrCode;
-    }
-    if (pixQrCodeUrl) {
-      updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
-    }
-    if (boletoUrl) {
-      updateData.ciabra_boleto_url = boletoUrl;
+    else {
+      // Evento genérico: Atualizar status e dados se fornecidos
+      console.log(`📝 Evento genérico: ${eventType}`);
+      if (status) updateData.status = status;
+      if (pixQrCode) updateData.ciabra_pix_qr_code = pixQrCode;
+      if (pixQrCodeUrl) updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
+      if (boletoUrl) updateData.ciabra_boleto_url = boletoUrl;
+      if (status === 'paid' && paidAt) {
+        updateData.paid_date = new Date(paidAt);
+      }
     }
 
     // Construir query de update dinamicamente

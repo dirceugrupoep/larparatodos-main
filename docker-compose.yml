@@ -91,7 +91,6 @@ services:
       - CIABRA_API_URL=${CIABRA_API_URL:-https://api.ciabra.com.br}
       - CIABRA_CLIENT_ID=${CIABRA_CLIENT_ID:-}
       - CIABRA_CLIENT_SECRET=${CIABRA_CLIENT_SECRET:-}
-      - CIABRA_WEBHOOK_SECRET=${CIABRA_WEBHOOK_SECRET:-}
       - DOMAIN=${DOMAIN:-localhost}
     depends_on:
       postgres:

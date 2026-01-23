@@ -32,40 +32,61 @@ docker compose down
 docker compose up -d --build
 ```
 
-## 🔗 Configurar Webhook no Painel do Ciabra
+## 🔗 Configurar Webhooks no Painel do Ciabra
+
+### ⚠️ Importante: Um Endpoint para Todos os Eventos
+
+**Use o mesmo endpoint para todos os eventos!**
+
+O sistema processa automaticamente diferentes tipos de eventos no mesmo endpoint.
 
 ### Passo 1: Acessar o Painel do Ciabra
 
 1. Faça login no painel do Ciabra Invoice
-2. Vá em **Configurações** → **Webhooks** (ou **Integrações**)
+2. Vá em **Webhooks**
 
-### Passo 2: Adicionar Webhook
+### Passo 2: Configurar Cada Evento
 
-Configure o webhook com:
+Para **cada um dos 4 eventos**, configure:
 
 - **URL do Webhook:**
   ```
   https://larparatodoshabitacional.com.br/api/ciabra/webhook
   ```
 
-- **Eventos para escutar:**
-  - ✅ Pagamento confirmado
-  - ✅ Pagamento cancelado
-  - ✅ Status de cobrança alterado
-  - ✅ Cobrança vencida
+- **Eventos a configurar:**
+  - ✅ **Cobrança criada** → Use a URL acima
+  - ✅ **Cobrança deletada** → Use a URL acima
+  - ✅ **Pagamento gerado** → Use a URL acima
+  - ✅ **Pagamento confirmado** → Use a URL acima ⭐ (mais importante)
+
+- **Para cada evento:**
+  1. Clique no ícone de editar (lápis)
+  2. Cole a URL: `https://larparatodoshabitacional.com.br/api/ciabra/webhook`
+  3. Ative o toggle "Ativo"
+  4. Clique em "Salvar"
 
 - **Método:** POST
 - **Formato:** JSON
 
-### Passo 3: Copiar o Webhook Secret
+### Passo 3: Pronto! ✅
 
-Após criar o webhook, o Ciabra vai gerar um **Webhook Secret**.
+**O endpoint de webhook já está criado e funcionando!**
 
-Copie esse secret e adicione no `.env`:
+Você não precisa configurar nenhum secret adicional. O sistema está pronto para receber os webhooks do Ciabra.
 
-```env
-CIABRA_WEBHOOK_SECRET=secret_gerado_pelo_ciabra
+**Endpoint disponível:**
 ```
+POST https://larparatodoshabitacional.com.br/api/ciabra/webhook
+```
+
+Este endpoint processa automaticamente todos os tipos de eventos:
+- ✅ Cobrança criada
+- ✅ Cobrança deletada  
+- ✅ Pagamento gerado
+- ✅ Pagamento confirmado
+
+📖 **Guia completo:** Ver `CONFIGURAR_WEBHOOKS_CIABRA.md`
 
 ## 🚀 Funcionamento do Sistema
 
