@@ -336,10 +336,12 @@ router.post('/charges', authenticateToken, async (req, res) => {
     }
 
     // Criar cobrança no Ciabra
+    // Formatar data de forma simples para a descrição
+    const dueDateFormatted = new Date(payment.due_date).toLocaleDateString('pt-BR');
     const chargeData = await createCharge({
       amount: parseFloat(payment.amount),
       due_date: payment.due_date,
-      description: `Contribuição mensal - ${payment.due_date}`,
+      description: `Contribuição mensal - ${dueDateFormatted}`,
       customer: {
         name: payment.name,
         email: payment.email,

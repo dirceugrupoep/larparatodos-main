@@ -122,29 +122,47 @@ export async function createInvoice(invoiceData) {
         ? `${process.env.FRONTEND_URL}/api/ciabra/webhook`
         : 'https://larparatodoshabitacional.com.br/api/ciabra/webhook');
 
+    // Limpar e normalizar descrição (remover datas longas)
+    let cleanDescription = invoiceData.description || 'Contribuição mensal - Larparatodos';
+    // Se a descrição contém uma data longa, simplificar
+    if (cleanDescription.includes('GMT') || cleanDescription.includes('Coordinated Universal Time')) {
+      cleanDescription = 'Contribuição mensal - Larparatodos';
+    }
+    // Limitar tamanho da descrição
+    if (cleanDescription.length > 200) {
+      cleanDescription = cleanDescription.substring(0, 197) + '...';
+    }
+
+    // Construir payload base
     const payload = {
       customerId: invoiceData.customerId,
-      description: invoiceData.description || 'Contribuição mensal - Larparatodos',
+      description: cleanDescription,
       dueDate: invoiceData.dueDate, // ISO 8601 format
       installmentCount: 1,
       invoiceType: 'SINGLE',
       items: [
         {
-          description: invoiceData.description || 'Contribuição mensal - Larparatodos',
+          description: cleanDescription,
           quantity: 1,
           price: invoiceData.price, // Valor em reais (não centavos)
         }
       ],
       price: invoiceData.price, // Valor em reais (não centavos)
-      externalId: invoiceData.externalId?.toString() || undefined,
-      paymentTypes: invoiceData.paymentTypes || ['PIX'], // ['PIX'] ou ['BOLETO'] ou ['PIX', 'BOLETO']
-      webhooks: [
+      paymentTypes: Array.isArray(invoiceData.paymentTypes) 
+        ? invoiceData.paymentTypes 
+        : (invoiceData.paymentTypes ? [invoiceData.paymentTypes] : ['PIX']),
+    };
+
+    // Adicionar externalId apenas se fornecido e válido
+    if (invoiceData.externalId && invoiceData.externalId.toString().trim()) {
+      payload.externalId = invoiceData.externalId.toString().trim();
+    }
+
+    // Adicionar webhooks apenas se a URL for válida
+    if (webhookUrl && webhookUrl.startsWith('http')) {
+      payload.webhooks = [
         {
           hookType: 'INVOICE_CREATED',
-          url: webhookUrl,
-        },
-        {
-          hookType: 'INVOICE_DELETED',
           url: webhookUrl,
         },
         {
@@ -155,11 +173,15 @@ export async function createInvoice(invoiceData) {
           hookType: 'PAYMENT_CONFIRMED',
           url: webhookUrl,
         },
-      ],
-    };
+      ];
+    }
 
-    // Remover campos undefined
-    Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
+    // Remover campos undefined (não deve ter nenhum agora, mas por segurança)
+    Object.keys(payload).forEach(key => {
+      if (payload[key] === undefined || payload[key] === null) {
+        delete payload[key];
+      }
+    });
 
     console.log(`📤 Criando invoice no Ciabra para cliente ${invoiceData.customerId}`);
     console.log(`📋 Payload enviado:`, JSON.stringify(payload, null, 2));
