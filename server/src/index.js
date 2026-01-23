@@ -20,11 +20,15 @@ import termsRoutes from './routes/terms.js';
 import ciabraRoutes from './routes/ciabra.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initializeBucket } from './services/storage.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy (necessário quando atrás de Apache/Nginx)
+app.set('trust proxy', true);
 
 // Security: Helmet para headers de segurança
 app.use(helmet({
@@ -91,6 +95,11 @@ app.get('/health', async (req, res) => {
 // Health check simples (sem banco)
 app.get('/ping', (req, res) => {
   res.json({ status: 'pong', timestamp: new Date().toISOString() });
+});
+
+// Inicializar bucket S3 na inicialização do servidor
+initializeBucket().catch(err => {
+  console.warn('⚠️  Aviso: Não foi possível verificar/criar bucket S3:', err.message);
 });
 
 // Routes

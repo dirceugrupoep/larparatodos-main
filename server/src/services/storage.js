@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, CreateBucketCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Configuração do cliente S3 (compatível com MinIO)
@@ -15,6 +15,51 @@ const s3Client = new S3Client({
 const BUCKET_NAME = process.env.S3_BUCKET || 'associations';
 
 /**
+ * Verifica se o bucket existe, se não, cria
+ */
+async function ensureBucketExists() {
+  try {
+    // Verificar se o bucket existe tentando fazer um HeadBucket
+    const headCommand = new HeadBucketCommand({ Bucket: BUCKET_NAME });
+    await s3Client.send(headCommand);
+    console.log(`✅ Bucket ${BUCKET_NAME} já existe`);
+    return true;
+  } catch (error) {
+    // Se o erro for 404 ou NotFound, o bucket não existe
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404 || error.Code === 'NoSuchBucket') {
+      // Bucket não existe, criar
+      try {
+        console.log(`📦 Criando bucket ${BUCKET_NAME}...`);
+        const createCommand = new CreateBucketCommand({ Bucket: BUCKET_NAME });
+        await s3Client.send(createCommand);
+        console.log(`✅ Bucket ${BUCKET_NAME} criado com sucesso!`);
+        return true;
+      } catch (createError) {
+        // Se já existe (erro 409), está ok
+        if (createError.$metadata?.httpStatusCode === 409 || createError.Code === 'BucketAlreadyOwnedByYou') {
+          console.log(`✅ Bucket ${BUCKET_NAME} já existe (criado por outro processo)`);
+          return true;
+        }
+        console.error(`❌ Erro ao criar bucket ${BUCKET_NAME}:`, createError.message || createError);
+        return false;
+      }
+    }
+    // Outro erro (permissão, conexão, etc)
+    console.warn(`⚠️  Aviso ao verificar bucket ${BUCKET_NAME}:`, error.message || error);
+    return false;
+  }
+}
+
+// Verificar/criar bucket na inicialização
+let bucketChecked = false;
+export async function initializeBucket() {
+  if (!bucketChecked) {
+    await ensureBucketExists();
+    bucketChecked = true;
+  }
+}
+
+/**
  * Faz upload de um arquivo para o bucket S3
  * @param {Buffer} fileBuffer - Buffer do arquivo
  * @param {string} fileName - Nome do arquivo
@@ -23,6 +68,9 @@ const BUCKET_NAME = process.env.S3_BUCKET || 'associations';
  */
 export async function uploadToS3(fileBuffer, fileName, contentType) {
   try {
+    // Garantir que o bucket existe antes de fazer upload
+    await initializeBucket();
+    
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: fileName,
