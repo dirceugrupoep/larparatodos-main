@@ -1,17 +1,37 @@
 import { pool } from './connection.js';
 
 // Função para aguardar o banco estar pronto
-async function waitForDatabase(maxRetries = 30, delay = 1000) {
+async function waitForDatabase(maxRetries = 60, delay = 2000) {
+  const dbConfig = {
+    host: process.env.DB_HOST || 'postgres',
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME || 'larparatodos',
+    user: process.env.DB_USER || 'postgres',
+  };
+  
+  console.log(`🔍 Tentando conectar ao banco: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database} como ${dbConfig.user}`);
+  
   for (let i = 0; i < maxRetries; i++) {
     try {
-      await pool.query('SELECT 1');
+      const result = await pool.query('SELECT 1');
       console.log('✅ Database connection established');
       return true;
     } catch (error) {
       if (i === maxRetries - 1) {
-        throw new Error('Database connection timeout');
+        console.error('❌ Última tentativa falhou:', error.message);
+        console.error('📋 Configuração do banco:', {
+          host: process.env.DB_HOST,
+          port: process.env.DB_PORT,
+          database: process.env.DB_NAME,
+          user: process.env.DB_USER,
+          password: process.env.DB_PASSWORD ? '***' : 'NOT SET',
+        });
+        throw new Error(`Database connection timeout: ${error.message}`);
       }
-      console.log(`⏳ Waiting for database... (${i + 1}/${maxRetries})`);
+      // Log sempre nas primeiras 5 tentativas, depois a cada 5
+      if (i < 5 || i % 5 === 0) {
+        console.log(`⏳ Waiting for database... (${i + 1}/${maxRetries}) - ${error.message}`);
+      }
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -88,6 +108,9 @@ async function runMigrations() {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='association_id') THEN
           ALTER TABLE users ADD COLUMN association_id INTEGER REFERENCES associations(id) ON DELETE SET NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='payment_day') THEN
+          ALTER TABLE users ADD COLUMN payment_day INTEGER CHECK (payment_day IN (10, 20));
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='associations' AND column_name='password') THEN
           ALTER TABLE associations ADD COLUMN password VARCHAR(255);
@@ -289,12 +312,36 @@ Ao clicar em "Aceito os Termos e Condições", você declara ter lido, compreend
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
         payment_method VARCHAR(50),
         transaction_id VARCHAR(255),
+        ciabra_charge_id VARCHAR(255),
+        ciabra_pix_qr_code TEXT,
+        ciabra_pix_qr_code_url TEXT,
+        ciabra_boleto_url TEXT,
         notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
     console.log('✅ Table "payments" created/verified');
+
+    // Adicionar colunas do Ciabra se não existirem
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='ciabra_charge_id') THEN
+          ALTER TABLE payments ADD COLUMN ciabra_charge_id VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='ciabra_pix_qr_code') THEN
+          ALTER TABLE payments ADD COLUMN ciabra_pix_qr_code TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='ciabra_pix_qr_code_url') THEN
+          ALTER TABLE payments ADD COLUMN ciabra_pix_qr_code_url TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='ciabra_boleto_url') THEN
+          ALTER TABLE payments ADD COLUMN ciabra_boleto_url TEXT;
+        END IF;
+      END $$;
+    `);
+    console.log('✅ Payment Ciabra columns verified');
 
     // Create project_status table
     await pool.query(`

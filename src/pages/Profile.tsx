@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { User, Save, Mail, Phone, MapPin, Calendar, Briefcase } from 'lucide-react';
+import { User, Save, Mail, Phone, MapPin, Calendar, Briefcase, CreditCard } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,13 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { profileApi, UserProfile } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const Profile = () => {
   const { toast } = useToast();
@@ -216,6 +223,51 @@ const Profile = () => {
                   placeholder="00000-000"
                 />
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Payment Day Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5" />
+              Dia de Pagamento
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label>Dia de Pagamento Mensal</Label>
+              <Select
+                value={user?.payment_day?.toString() || ''}
+                onValueChange={async (value) => {
+                  try {
+                    await profileApi.updatePaymentDay(parseInt(value) as 10 | 20);
+                    toast({
+                      title: 'Sucesso!',
+                      description: 'Dia de pagamento atualizado com sucesso',
+                    });
+                    loadProfile();
+                  } catch (error) {
+                    toast({
+                      title: 'Erro',
+                      description: error instanceof Error ? error.message : 'Erro ao atualizar dia de pagamento',
+                      variant: 'destructive',
+                    });
+                  }
+                }}
+              >
+                <SelectTrigger className="h-12">
+                  <SelectValue placeholder="Selecione o dia de pagamento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">Dia 10 de cada mês</SelectItem>
+                  <SelectItem value="20">Dia 20 de cada mês</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Você sempre pagará nesta data. Esta data será usada para gerar suas cobranças mensais automaticamente.
+              </p>
             </div>
           </CardContent>
         </Card>

@@ -5,6 +5,7 @@ export interface User {
   name: string;
   email: string;
   phone?: string;
+  payment_day?: number;
   created_at?: string;
 }
 
@@ -26,8 +27,24 @@ export const authApi = {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Erro ao fazer login');
+      // Verificar se a resposta é JSON ou HTML
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          const error = await response.json();
+          throw new Error(error.error || 'Erro ao fazer login');
+        } catch (e) {
+          if (e instanceof Error && e.message.includes('JSON')) {
+            throw new Error('Erro no servidor: Backend pode não estar rodando corretamente');
+          }
+          throw e;
+        }
+      } else {
+        // Se não for JSON, provavelmente é HTML (erro do servidor)
+        const text = await response.text();
+        console.error('Backend retornou HTML em vez de JSON:', text.substring(0, 200));
+        throw new Error(`Erro no servidor (${response.status}): Backend pode não estar rodando. Verifique os logs do container.`);
+      }
     }
 
     return response.json();
@@ -38,12 +55,13 @@ export const authApi = {
     email: string,
     password: string,
     phone?: string,
-    association_id?: number
+    association_id?: number,
+    payment_day?: number
   ): Promise<RegisterResponse> {
     const response = await fetch(`${API_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, phone, association_id }),
+      body: JSON.stringify({ name, email, password, phone, association_id, payment_day }),
     });
 
     if (!response.ok) {
@@ -311,6 +329,10 @@ export interface Payment {
   status: 'pending' | 'paid' | 'overdue';
   payment_method?: string;
   transaction_id?: string;
+  ciabra_charge_id?: string;
+  ciabra_pix_qr_code?: string;
+  ciabra_pix_qr_code_url?: string;
+  ciabra_boleto_url?: string;
   notes?: string;
   created_at: string;
 }
@@ -372,6 +394,53 @@ export const paymentsApi = {
   },
 };
 
+// Ciabra API
+export const ciabraApi = {
+  async createCharge(paymentId: number | null, paymentMethod: 'pix' | 'boleto' = 'pix') {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+
+    const body: any = { payment_method: paymentMethod };
+    if (paymentId !== null && paymentId !== undefined) {
+      body.payment_id = paymentId;
+    }
+
+    const response = await fetch(`${API_URL}/api/ciabra/charges`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Erro ao criar cobrança');
+    }
+
+    return response.json();
+  },
+
+  async getChargeStatus(chargeId: string) {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+
+    const response = await fetch(`${API_URL}/api/ciabra/charges/${chargeId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Erro ao consultar cobrança');
+    }
+
+    return response.json();
+  },
+};
+
 
 // Profile API
 export interface UserProfile {
@@ -423,6 +492,27 @@ export const profileApi = {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || 'Erro ao atualizar perfil');
+    }
+
+    return response.json();
+  },
+
+  async updatePaymentDay(paymentDay: 10 | 20) {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+
+    const response = await fetch(`${API_URL}/api/profile/payment-day`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ payment_day: paymentDay }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Erro ao atualizar dia de pagamento');
     }
 
     return response.json();

@@ -8,7 +8,10 @@
     "start": "node src/index.js",
     "migrate": "node src/database/migrate.js",
     "seed": "node src/database/seed.js",
-    "create-admin": "node src/scripts/create-admin.js"
+    "create-admin": "node src/scripts/create-admin.js",
+    "generate-charges": "node src/scripts/run-monthly-charges.js",
+    "check-payments": "node src/scripts/check-payment-status.js",
+    "update-overdue": "node src/scripts/update-overdue.js"
   },
   "dependencies": {
     "express": "^4.18.2",

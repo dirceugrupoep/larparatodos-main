@@ -17,6 +17,7 @@ import associationAuthRoutes from './routes/association-auth.js';
 import associationUploadRoutes from './routes/association-upload.js';
 import associationDashboardRoutes from './routes/association-dashboard.js';
 import termsRoutes from './routes/terms.js';
+import ciabraRoutes from './routes/ciabra.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -53,8 +54,8 @@ app.use('/api/', limiter);
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:8080',
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Limitar tamanho do body
@@ -70,10 +71,26 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', database: 'connected' });
+    res.json({ 
+      status: 'ok', 
+      database: 'connected',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
   } catch (error) {
-    res.status(500).json({ status: 'error', database: 'disconnected' });
+    console.error('Health check failed:', error.message);
+    res.status(503).json({ 
+      status: 'error', 
+      database: 'disconnected',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
+});
+
+// Health check simples (sem banco)
+app.get('/ping', (req, res) => {
+  res.json({ status: 'pong', timestamp: new Date().toISOString() });
 });
 
 // Routes
@@ -89,6 +106,7 @@ app.use('/api/association-auth', associationAuthRoutes); // Autenticação de as
 app.use('/api/association-upload', associationUploadRoutes); // Upload de imagens de associações
 app.use('/api/association-dashboard', associationDashboardRoutes); // Dashboard e métricas da associação
 app.use('/api/terms', termsRoutes); // Termos de aceite
+app.use('/api/ciabra', ciabraRoutes); // Integração com Ciabra Invoice
 
 // Error handler (deve ser o último middleware)
 app.use(errorHandler);
@@ -96,5 +114,17 @@ app.use(errorHandler);
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 API available at http://0.0.0.0:${PORT}/api`);
+  console.log(`💚 Health check: http://0.0.0.0:${PORT}/health`);
+});
+
+// Tratamento de erros não capturados
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  process.exit(1);
 });
 

@@ -21,6 +21,9 @@ const registerSchema = z.object({
     .max(100, 'Senha muito longa'),
   phone: z.string().max(20).optional(),
   association_id: z.number().int().positive().optional(),
+  payment_day: z.number().int().refine((val) => val === 10 || val === 20, {
+    message: 'Dia de pagamento deve ser 10 ou 20',
+  }).optional(),
 });
 
 const loginSchema = z.object({
@@ -32,7 +35,7 @@ const loginSchema = z.object({
 router.post('/register', async (req, res) => {
   try {
     const validatedData = registerSchema.parse(req.body);
-    const { name, email, password, phone, association_id } = validatedData;
+    const { name, email, password, phone, association_id, payment_day } = validatedData;
 
     // Check if user exists
     const existingUser = await pool.query(
@@ -71,8 +74,8 @@ router.post('/register', async (req, res) => {
 
     // Insert user
     const result = await pool.query(
-      'INSERT INTO users (name, email, password, phone, association_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, phone, created_at',
-      [name, email, hashedPassword, phone || null, finalAssociationId || null]
+      'INSERT INTO users (name, email, password, phone, association_id, payment_day) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, phone, payment_day, created_at',
+      [name, email, hashedPassword, phone || null, finalAssociationId || null, payment_day || null]
     );
 
     const user = result.rows[0];
@@ -91,9 +94,9 @@ router.post('/register', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    // Buscar is_admin do usuário
+    // Buscar dados completos do usuário
     const userWithAdmin = await pool.query(
-      'SELECT id, name, email, phone, is_admin, is_active FROM users WHERE id = $1',
+      'SELECT id, name, email, phone, is_admin, is_active, payment_day FROM users WHERE id = $1',
       [user.id]
     );
 
@@ -106,6 +109,7 @@ router.post('/register', async (req, res) => {
         phone: userWithAdmin.rows[0].phone,
         is_admin: userWithAdmin.rows[0].is_admin || false,
         is_active: userWithAdmin.rows[0].is_active !== false,
+        payment_day: userWithAdmin.rows[0].payment_day,
       },
       token,
     });
@@ -121,6 +125,16 @@ router.post('/register', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
+    // Verificar se o pool está conectado
+    try {
+      await pool.query('SELECT 1');
+    } catch (dbError) {
+      console.error('❌ Erro de conexão com banco durante login:', dbError.message);
+      return res.status(503).json({ 
+        error: 'Serviço temporariamente indisponível. Banco de dados não está acessível.' 
+      });
+    }
+
     const validatedData = loginSchema.parse(req.body);
     const { email, password } = validatedData;
 

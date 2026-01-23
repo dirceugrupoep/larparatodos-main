@@ -12,8 +12,19 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const getImageUrl = (url?: string) => {
   if (!url) return undefined;
-  if (url.startsWith('http')) return url;
-  return `${API_URL}${url}`;
+  // Se já é URL completa (http/https), retornar direto
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  // Se começa com /storage, já está no formato correto
+  if (url.startsWith('/storage/')) return url;
+  // Se é apenas o nome do arquivo, adicionar /storage/
+  // O backend retorna URLs como https://dominio/storage/filename.png
+  // Mas pode retornar apenas o filename, então construímos a URL completa
+  if (url.includes('/')) {
+    // Já tem path, usar direto
+    return url.startsWith('/') ? url : `/${url}`;
+  }
+  // Apenas filename, adicionar /storage/
+  return `/storage/${url}`;
 };
 
 const AssociationsList = () => {

@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
     // Buscar dados do usuário e perfil
     const [userResult, profileResult] = await Promise.all([
       pool.query(
-        'SELECT id, name, email, phone, created_at FROM users WHERE id = $1',
+        'SELECT id, name, email, phone, payment_day, created_at FROM users WHERE id = $1',
         [userId]
       ),
       pool.query(
@@ -134,6 +134,34 @@ router.put('/', async (req, res) => {
     }
     console.error('Update profile error:', error);
     res.status(500).json({ error: 'Erro ao atualizar perfil' });
+  }
+});
+
+// Update payment day
+router.put('/payment-day', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { payment_day } = req.body;
+
+    if (payment_day !== 10 && payment_day !== 20) {
+      return res.status(400).json({ error: 'Dia de pagamento deve ser 10 ou 20' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users 
+       SET payment_day = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING id, name, email, payment_day`,
+      [payment_day, userId]
+    );
+
+    res.json({
+      message: 'Dia de pagamento atualizado com sucesso',
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Update payment day error:', error);
+    res.status(500).json({ error: 'Erro ao atualizar dia de pagamento' });
   }
 });
 

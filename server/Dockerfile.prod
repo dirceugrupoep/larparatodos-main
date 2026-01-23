@@ -20,6 +20,7 @@ COPY . .
 EXPOSE 3000
 
 # Comando para iniciar
+# Aguardar um pouco antes de tentar conectar (dar tempo pro PostgreSQL)
 # Primeiro executa migrations e seed, depois inicia o servidor
-CMD ["sh", "-c", "npm run migrate && npm run seed && npm start"]
+CMD ["sh", "-c", "sleep 5 && npm run migrate && npm run seed && npm start"]
 

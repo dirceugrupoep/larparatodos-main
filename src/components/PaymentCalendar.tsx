@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns';
 
 interface Payment {
-  id: number;
+  id: number | null;
   due_date: string;
   paid_date?: string;
   amount: number;
@@ -15,10 +15,11 @@ interface Payment {
 
 interface PaymentCalendarProps {
   payments: Payment[];
+  nextPayment?: Payment | null;
   onDateClick?: (date: Date) => void;
 }
 
-export const PaymentCalendar = ({ payments, onDateClick }: PaymentCalendarProps) => {
+export const PaymentCalendar = ({ payments, nextPayment, onDateClick }: PaymentCalendarProps) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const monthStart = startOfMonth(currentDate);
@@ -26,10 +27,26 @@ export const PaymentCalendar = ({ payments, onDateClick }: PaymentCalendarProps)
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
   const getPaymentsForDate = (date: Date) => {
-    return payments.filter((payment) => {
+    const regularPayments = payments.filter((payment) => {
       const paymentDate = new Date(payment.due_date);
       return isSameDay(paymentDate, date);
     });
+
+    // Adicionar nextPayment se não estiver na lista e for do mesmo dia
+    if (nextPayment && nextPayment.due_date) {
+      const nextPaymentDate = new Date(nextPayment.due_date);
+      const isNextPaymentDay = isSameDay(nextPaymentDate, date);
+      const alreadyInList = regularPayments.some((p) => 
+        p.id === nextPayment.id || 
+        (p.id === null && nextPayment.id === null && isSameDay(new Date(p.due_date), nextPaymentDate))
+      );
+
+      if (isNextPaymentDay && !alreadyInList) {
+        return [...regularPayments, nextPayment];
+      }
+    }
+
+    return regularPayments;
   };
 
   const getStatusColor = (status: string) => {
@@ -123,9 +140,9 @@ export const PaymentCalendar = ({ payments, onDateClick }: PaymentCalendarProps)
                 </div>
                 {dayPayments.length > 0 && (
                   <div className="space-y-1">
-                    {dayPayments.slice(0, 2).map((payment) => (
+                    {dayPayments.slice(0, 2).map((payment, idx) => (
                       <Badge
-                        key={payment.id}
+                        key={payment.id || `next-${idx}`}
                         className={`${getStatusColor(payment.status)} text-xs flex items-center gap-1 w-full justify-center`}
                       >
                         {getStatusIcon(payment.status)}

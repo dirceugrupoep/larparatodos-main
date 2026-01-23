@@ -10,12 +10,16 @@ import {
   TrendingUp,
   FileText,
   Sparkles,
+  QrCode,
+  Receipt,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { paymentsApi, Payment } from '@/lib/api';
+import { paymentsApi, Payment, ciabraApi } from '@/lib/api';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { PaymentCalendar } from '@/components/PaymentCalendar';
 import {
@@ -41,6 +45,9 @@ const Payments = () => {
     transaction_id: '',
     notes: '',
   });
+  const [creatingCharge, setCreatingCharge] = useState<number | null>(null);
+  const [showPixDialog, setShowPixDialog] = useState(false);
+  const [pixQrCode, setPixQrCode] = useState<string>('');
 
   useEffect(() => {
     loadData();
@@ -97,6 +104,45 @@ const Payments = () => {
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('pt-BR');
+  };
+
+  const handleCreateCharge = async (paymentId: number | null, method: 'pix' | 'boleto') => {
+    try {
+      // Usar -1 como identificador quando paymentId é null
+      const chargeId = paymentId || -1;
+      setCreatingCharge(chargeId);
+      const response = await ciabraApi.createCharge(paymentId, method);
+      
+      if (method === 'pix' && response.payment.ciabra_pix_qr_code) {
+        setPixQrCode(response.payment.ciabra_pix_qr_code);
+        setShowPixDialog(true);
+      } else if (method === 'boleto' && response.payment.ciabra_boleto_url) {
+        window.open(response.payment.ciabra_boleto_url, '_blank');
+      }
+
+      toast({
+        title: 'Sucesso!',
+        description: `Cobrança ${method === 'pix' ? 'PIX' : 'Boleto'} criada com sucesso`,
+      });
+
+      loadData();
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Erro ao criar cobrança',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreatingCharge(null);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: 'Copiado!',
+      description: 'Código PIX copiado para a área de transferência',
+    });
   };
 
   const getStatusBadge = (payment: Payment) => {
@@ -261,11 +307,19 @@ const Payments = () => {
         >
           <PaymentCalendar
             payments={payments}
+            nextPayment={stats?.nextPayment || null}
             onDateClick={(date) => {
               const dayPayments = payments.filter((p) => {
                 const paymentDate = new Date(p.due_date);
                 return paymentDate.toDateString() === date.toDateString();
               });
+              // Verificar se é o próximo pagamento
+              if (stats?.nextPayment) {
+                const nextPaymentDate = new Date(stats.nextPayment.due_date);
+                if (nextPaymentDate.toDateString() === date.toDateString()) {
+                  dayPayments.push(stats.nextPayment);
+                }
+              }
               if (dayPayments.length > 0) {
                 toast({
                   title: `Pagamentos em ${date.toLocaleDateString('pt-BR')}`,
@@ -302,73 +356,139 @@ const Payments = () => {
                       <Calendar className="w-4 h-4" />
                       Vencimento: {formatDate(stats.nextPayment.due_date)}
                     </p>
+                    {!stats.nextPayment.id && (
+                      <p className="text-xs text-muted-foreground mt-1 italic">
+                        * Pagamento será criado ao gerar a cobrança
+                      </p>
+                    )}
                   </div>
-                {stats.nextPayment.status === 'pending' && (
-                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button
-                        onClick={() => setSelectedPayment(stats.nextPayment)}
-                      >
-                        Marcar como Pago
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="border-2 border-primary/20">
-                      <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                          <Sparkles className="w-5 h-5 text-primary" />
-                          Confirmar Pagamento
-                        </DialogTitle>
-                        <DialogDescription>
-                          Informe os detalhes do pagamento realizado
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div>
-                          <Label>Método de Pagamento</Label>
-                          <Input
-                            placeholder="Ex: PIX, Boleto, Transferência"
-                            value={paymentData.payment_method}
-                            onChange={(e) =>
-                              setPaymentData({
-                                ...paymentData,
-                                payment_method: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label>ID da Transação (opcional)</Label>
-                          <Input
-                            placeholder="Código da transação"
-                            value={paymentData.transaction_id}
-                            onChange={(e) =>
-                              setPaymentData({
-                                ...paymentData,
-                                transaction_id: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label>Observações (opcional)</Label>
-                          <Input
-                            placeholder="Observações adicionais"
-                            value={paymentData.notes}
-                            onChange={(e) =>
-                              setPaymentData({
-                                ...paymentData,
-                                notes: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <Button onClick={handleMarkAsPaid} className="w-full">
-                          Confirmar Pagamento
+                  <div className="flex gap-2">
+                    {!stats.nextPayment.ciabra_charge_id ? (
+                      <>
+                        <Button
+                          onClick={() => handleCreateCharge(stats.nextPayment.id || null, 'pix')}
+                          disabled={creatingCharge === (stats.nextPayment.id || -1)}
+                        >
+                          {creatingCharge === (stats.nextPayment.id || -1) ? (
+                            'Gerando...'
+                          ) : (
+                            <>
+                              <QrCode className="w-4 h-4 mr-1" />
+                              Pagar com PIX
+                            </>
+                          )}
                         </Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                )}
+                        <Button
+                          variant="outline"
+                          onClick={() => handleCreateCharge(stats.nextPayment.id || null, 'boleto')}
+                          disabled={creatingCharge === (stats.nextPayment.id || -1)}
+                        >
+                          {creatingCharge === (stats.nextPayment.id || -1) ? (
+                            'Gerando...'
+                          ) : (
+                            <>
+                              <Receipt className="w-4 h-4 mr-1" />
+                              Gerar Boleto
+                            </>
+                          )}
+                        </Button>
+                      </>
+                    ) : (
+                        <>
+                          {stats.nextPayment.ciabra_pix_qr_code_url && (
+                            <Button
+                              onClick={() => {
+                                if (stats.nextPayment.ciabra_pix_qr_code) {
+                                  setPixQrCode(stats.nextPayment.ciabra_pix_qr_code);
+                                  setShowPixDialog(true);
+                                } else {
+                                  window.open(stats.nextPayment.ciabra_pix_qr_code_url, '_blank');
+                                }
+                              }}
+                            >
+                              <QrCode className="w-4 h-4 mr-1" />
+                              Ver PIX
+                            </Button>
+                          )}
+                          {stats.nextPayment.ciabra_boleto_url && (
+                            <Button
+                              variant="outline"
+                              onClick={() => window.open(stats.nextPayment.ciabra_boleto_url, '_blank')}
+                            >
+                              <ExternalLink className="w-4 h-4 mr-1" />
+                              Ver Boleto
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {stats.nextPayment.id && stats.nextPayment.status === 'pending' && (
+                        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              onClick={() => setSelectedPayment(stats.nextPayment)}
+                            >
+                              Marcar como Pago
+                            </Button>
+                          </DialogTrigger>
+                        <DialogContent className="border-2 border-primary/20">
+                          <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                              <Sparkles className="w-5 h-5 text-primary" />
+                              Confirmar Pagamento
+                            </DialogTitle>
+                            <DialogDescription>
+                              Informe os detalhes do pagamento realizado
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4 py-4">
+                            <div>
+                              <Label>Método de Pagamento</Label>
+                              <Input
+                                placeholder="Ex: PIX, Boleto, Transferência"
+                                value={paymentData.payment_method}
+                                onChange={(e) =>
+                                  setPaymentData({
+                                    ...paymentData,
+                                    payment_method: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>ID da Transação (opcional)</Label>
+                              <Input
+                                placeholder="Código da transação"
+                                value={paymentData.transaction_id}
+                                onChange={(e) =>
+                                  setPaymentData({
+                                    ...paymentData,
+                                    transaction_id: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>Observações (opcional)</Label>
+                              <Input
+                                placeholder="Observações adicionais"
+                                value={paymentData.notes}
+                                onChange={(e) =>
+                                  setPaymentData({
+                                    ...paymentData,
+                                    notes: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <Button onClick={handleMarkAsPaid} className="w-full">
+                              Confirmar Pagamento
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -427,16 +547,81 @@ const Payments = () => {
                       )}
                     </div>
                     {payment.status === 'pending' && (
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedPayment(payment)}
-                          >
-                            Marcar como Pago
-                          </Button>
-                        </DialogTrigger>
+                      <div className="flex gap-2">
+                        {!payment.ciabra_charge_id ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCreateCharge(payment.id, 'pix')}
+                              disabled={creatingCharge === payment.id}
+                            >
+                              {creatingCharge === payment.id ? (
+                                'Gerando...'
+                              ) : (
+                                <>
+                                  <QrCode className="w-4 h-4 mr-1" />
+                                  PIX
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCreateCharge(payment.id, 'boleto')}
+                              disabled={creatingCharge === payment.id}
+                            >
+                              {creatingCharge === payment.id ? (
+                                'Gerando...'
+                              ) : (
+                                <>
+                                  <Receipt className="w-4 h-4 mr-1" />
+                                  Boleto
+                                </>
+                              )}
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            {payment.ciabra_pix_qr_code_url && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  if (payment.ciabra_pix_qr_code) {
+                                    setPixQrCode(payment.ciabra_pix_qr_code);
+                                    setShowPixDialog(true);
+                                  } else {
+                                    window.open(payment.ciabra_pix_qr_code_url, '_blank');
+                                  }
+                                }}
+                              >
+                                <QrCode className="w-4 h-4 mr-1" />
+                                Ver PIX
+                              </Button>
+                            )}
+                            {payment.ciabra_boleto_url && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(payment.ciabra_boleto_url, '_blank')}
+                              >
+                                <ExternalLink className="w-4 h-4 mr-1" />
+                                Boleto
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setSelectedPayment(payment)}
+                            >
+                              Marcar como Pago
+                            </Button>
+                          </DialogTrigger>
                         <DialogContent>
                           <DialogHeader>
                             <DialogTitle>Confirmar Pagamento</DialogTitle>
@@ -496,6 +681,7 @@ const Payments = () => {
                           </div>
                         </DialogContent>
                       </Dialog>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -503,6 +689,51 @@ const Payments = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* PIX QR Code Dialog */}
+        <Dialog open={showPixDialog} onOpenChange={setShowPixDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <QrCode className="w-5 h-5" />
+                Pagamento via PIX
+              </DialogTitle>
+              <DialogDescription>
+                Escaneie o QR Code ou copie o código para pagar
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {pixQrCode && (
+                <>
+                  <div className="flex justify-center p-4 bg-white rounded-lg">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixQrCode)}`}
+                      alt="QR Code PIX"
+                      className="w-48 h-48"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Código PIX (Copiar e Colar)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={pixQrCode}
+                        readOnly
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => copyToClipboard(pixQrCode)}
+                      >
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

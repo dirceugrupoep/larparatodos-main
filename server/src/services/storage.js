@@ -34,10 +34,10 @@ export async function uploadToS3(fileBuffer, fileName, contentType) {
     await s3Client.send(command);
 
     // Retornar URL pública
-    // Para MinIO, usar S3_PUBLIC_URL (endpoint externo acessível pelo frontend)
-    // Para produção com S3, usar: https://bucket.s3.region.amazonaws.com/key
+    // Para MinIO com proxy Apache, usar S3_PUBLIC_URL (já inclui /storage)
+    // O proxy Apache mapeia /storage -> http://127.0.0.1:9000/associations
     const publicUrl = process.env.S3_PUBLIC_URL 
-      ? `${process.env.S3_PUBLIC_URL}/${BUCKET_NAME}/${fileName}`
+      ? `${process.env.S3_PUBLIC_URL}/${fileName}`
       : `${process.env.S3_ENDPOINT || 'http://localhost:9000'}/${BUCKET_NAME}/${fileName}`;
     return publicUrl;
   } catch (error) {

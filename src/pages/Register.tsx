@@ -30,6 +30,7 @@ const Register = () => {
     confirmPassword: '',
     phone: '',
     association_id: undefined as number | undefined,
+    payment_day: undefined as 10 | 20 | undefined,
     acceptedTerms: false,
   });
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -101,6 +102,15 @@ const Register = () => {
       return;
     }
 
+    if (!formData.payment_day) {
+      toast({
+        title: 'Erro',
+        description: 'Por favor, selecione o dia de pagamento',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!formData.acceptedTerms) {
       toast({
         title: 'Atenção',
@@ -118,7 +128,8 @@ const Register = () => {
         formData.email,
         formData.password,
         formData.phone || undefined,
-        formData.association_id
+        formData.association_id,
+        formData.payment_day
       );
       
       // Registrar aceite do termo
@@ -257,6 +268,29 @@ const Register = () => {
                     className="pl-10 h-12"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  Dia de Pagamento <span className="text-red-500">*</span>
+                </label>
+                <Select
+                  value={formData.payment_day?.toString() || ''}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, payment_day: parseInt(value) as 10 | 20 })
+                  }
+                >
+                  <SelectTrigger className="h-12">
+                    <SelectValue placeholder="Selecione o dia de pagamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">Dia 10 de cada mês</SelectItem>
+                    <SelectItem value="20">Dia 20 de cada mês</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Você sempre pagará nesta data. Escolha com cuidado.
+                </p>
               </div>
 
               <div>
