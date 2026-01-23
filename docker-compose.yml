@@ -71,6 +71,10 @@ services:
     container_name: larparatodos-backend
     ports:
       - "127.0.0.1:3000:3000"
+    # Configurar DNS servers para resolver domínios externos
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=3000
@@ -113,6 +117,7 @@ services:
       - "127.0.0.1:8080:80"
     depends_on:
       - backend
+      - minio
     restart: always
     networks:
       - larparatodos-network

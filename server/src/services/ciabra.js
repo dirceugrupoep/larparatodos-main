@@ -23,11 +23,22 @@ async function getAccessToken() {
   }
 
   try {
-    const response = await fetch(`${CIABRA_API_URL}/oauth/token`, {
+    const tokenUrl = `${CIABRA_API_URL}/oauth/token`;
+    console.log(`🔐 Tentando autenticar no Ciabra: ${tokenUrl}`);
+    console.log(`📡 API URL configurada: ${CIABRA_API_URL}`);
+    
+    // Verificar se a URL está configurada
+    if (!CIABRA_API_URL || CIABRA_API_URL === 'https://api.ciabra.com.br') {
+      console.warn('⚠️  Verifique se a URL da API do Ciabra está correta na documentação oficial');
+    }
+    
+    const response = await fetch(tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      // Adicionar timeout para evitar travamento
+      signal: AbortSignal.timeout(10000), // 10 segundos
       body: JSON.stringify({
         grant_type: 'client_credentials',
         client_id: CIABRA_CLIENT_ID,
@@ -47,7 +58,20 @@ async function getAccessToken() {
 
     return accessToken;
   } catch (error) {
-    console.error('Erro ao obter token do Ciabra:', error);
+    console.error('❌ Erro ao obter token do Ciabra:', error);
+    
+    // Diagnóstico mais detalhado
+    if (error.cause && error.cause.code === 'ENOTFOUND') {
+      console.error('🔍 Diagnóstico DNS:');
+      console.error(`   - Domínio não encontrado: ${error.cause.hostname}`);
+      console.error(`   - Verifique se a URL está correta: ${CIABRA_API_URL}`);
+      console.error('   - Possíveis causas:');
+      console.error('     1. URL da API incorreta (verifique na documentação do Ciabra)');
+      console.error('     2. Container sem acesso à internet');
+      console.error('     3. DNS não configurado corretamente');
+      console.error('   - Teste manual: docker exec larparatodos-backend nslookup api.ciabra.com.br');
+    }
+    
     throw error;
   }
 }
