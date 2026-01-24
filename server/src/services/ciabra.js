@@ -570,6 +570,9 @@ export function verifyWebhookSignature(signature, payload) {
  * @returns {Object} Dados processados
  */
 export function processWebhook(webhookData) {
+  console.log('🔄 [processWebhook] Processando dados do webhook...');
+  console.log('🔄 [processWebhook] Payload recebido:', JSON.stringify(webhookData, null, 2));
+  
   // Mapear status do Ciabra para nosso sistema
   const statusMap = {
     pending: 'pending',
@@ -579,37 +582,78 @@ export function processWebhook(webhookData) {
     canceled: 'cancelled',
     confirmed: 'paid',
     generated: 'pending',
+    WAITING_PAYMENT: 'pending',
+    PAID: 'paid',
+    OVERDUE: 'overdue',
   };
 
   // Tipos de eventos do Ciabra:
   // INVOICE_CREATED, INVOICE_DELETED, PAYMENT_GENERATED, PAYMENT_CONFIRMED, PAYMENT_RECEIVED, PAYMENT_REFUNDED
-  const eventType = webhookData.hookType || webhookData.event || webhookData.type || 'UNKNOWN';
+  const eventType = webhookData.hookType || webhookData.event || webhookData.type || webhookData.eventType || 'UNKNOWN';
+  console.log(`🔍 [processWebhook] Evento identificado: ${eventType}`);
   
-  // Extrair dados da invoice/pagamento
-  const invoiceData = webhookData.invoice || webhookData.data || webhookData;
-  const paymentData = webhookData.payment || webhookData.data || webhookData;
+  // Extrair dados da invoice/pagamento (pode estar em diferentes estruturas)
+  const invoiceData = webhookData.invoice || webhookData.data?.invoice || webhookData.data || webhookData;
+  const paymentData = webhookData.payment || webhookData.data?.payment || webhookData.data || webhookData;
+  const installmentData = webhookData.installment || webhookData.data?.installment;
   
-  console.log(`🔍 Identificado evento: ${eventType}`);
+  console.log(`🔍 [processWebhook] invoiceData:`, JSON.stringify(invoiceData, null, 2));
+  console.log(`🔍 [processWebhook] paymentData:`, JSON.stringify(paymentData, null, 2));
+  console.log(`🔍 [processWebhook] installmentData:`, JSON.stringify(installmentData, null, 2));
 
   // Extrair ID da invoice (pode estar em diferentes lugares)
-  const invoiceId = invoiceData.id || invoiceData.invoiceId || webhookData.invoiceId || webhookData.id;
+  const invoiceId = invoiceData.id || invoiceData.invoiceId || webhookData.invoiceId || webhookData.id || installmentData?.invoiceId;
+  console.log(`🔍 [processWebhook] invoiceId extraído: ${invoiceId}`);
   
   // Extrair dados do pagamento se disponível
-  const paymentId = paymentData.id || paymentData.paymentId || invoiceData.paymentId;
+  const paymentId = paymentData.id || paymentData.paymentId || invoiceData.paymentId || installmentData?.id;
+  console.log(`🔍 [processWebhook] paymentId extraído: ${paymentId}`);
 
-  return {
+  // Extrair status (pode estar em diferentes lugares)
+  const rawStatus = invoiceData.status || paymentData?.status || installmentData?._status || invoiceData._status || paymentData?.status;
+  const status = statusMap[rawStatus] || statusMap[rawStatus?.toLowerCase()] || rawStatus || 'pending';
+  console.log(`🔍 [processWebhook] Status extraído: ${rawStatus} -> ${status}`);
+
+  // Extrair data de pagamento (pode estar em diferentes lugares)
+  const paidAt = paymentData?.paidAt || paymentData?.paid_at || paymentData?.paidAt || 
+                 paymentData?.confirmedAt || paymentData?.confirmed_at ||
+                 invoiceData.paidAt || invoiceData.paid_at ||
+                 installmentData?.paidAt || installmentData?.paid_at ||
+                 webhookData.paidAt || webhookData.paid_at;
+  console.log(`🔍 [processWebhook] paidAt extraído: ${paidAt || 'não encontrado'}`);
+
+  // Extrair dados do PIX (pode estar em diferentes lugares)
+  const pixData = paymentData?.pix || invoiceData.pix || webhookData.pix || installmentData?.pix;
+  const pixQrCode = pixData?.emv || pixData?.qrCode || pixData?.qr_code || pixData?.code || paymentData?.pixCode;
+  const pixQrCodeUrl = pixData?.location || pixData?.qrCodeUrl || pixData?.qr_code_url || pixData?.url;
+  console.log(`🔍 [processWebhook] PIX QR Code: ${pixQrCode ? pixQrCode.substring(0, 50) + '...' : 'não encontrado'}`);
+  console.log(`🔍 [processWebhook] PIX QR Code URL: ${pixQrCodeUrl || 'não encontrado'}`);
+
+  // Extrair dados do Boleto
+  const boletoData = paymentData?.boleto || invoiceData.boleto || webhookData.boleto;
+  const boletoUrl = boletoData?.url || boletoData?.link || paymentData?.boletoUrl;
+  console.log(`🔍 [processWebhook] Boleto URL: ${boletoUrl || 'não encontrado'}`);
+
+  // Extrair externalId (nosso payment_id)
+  const externalId = invoiceData.externalId || webhookData.externalId || paymentData?.externalId;
+  console.log(`🔍 [processWebhook] externalId extraído: ${externalId || 'não encontrado'}`);
+
+  const result = {
     eventType, // Tipo de evento (INVOICE_CREATED, PAYMENT_CONFIRMED, etc)
     invoiceId, // ID da invoice no Ciabra
     paymentId, // ID do pagamento (se disponível)
     chargeId: invoiceId, // Alias para compatibilidade
-    status: statusMap[invoiceData.status] || statusMap[paymentData?.status] || invoiceData.status || 'pending',
-    paidAt: paymentData?.paidAt || paymentData?.paid_at || paymentData?.confirmedAt || invoiceData.paidAt || invoiceData.paid_at,
-    amount: invoiceData.price || paymentData?.amount || invoiceData.amount,
-    pixQrCode: paymentData?.pix?.qrCode || paymentData?.pix?.qr_code || paymentData?.pixCode || invoiceData.pix?.qrCode,
-    pixQrCodeUrl: paymentData?.pix?.qrCodeUrl || paymentData?.pix?.qr_code_url || paymentData?.pixUrl || invoiceData.pix?.qrCodeUrl,
-    boletoUrl: paymentData?.boleto?.url || paymentData?.boletoUrl || invoiceData.boleto?.url,
-    externalId: invoiceData.externalId || webhookData.externalId, // ID externo (nosso payment_id)
+    status, // Status mapeado
+    paidAt, // Data de pagamento
+    amount: invoiceData.price || paymentData?.amount || invoiceData.amount || installmentData?.price,
+    pixQrCode,
+    pixQrCodeUrl,
+    boletoUrl,
+    externalId, // ID externo (nosso payment_id)
   };
+
+  console.log(`✅ [processWebhook] Dados processados:`, JSON.stringify(result, null, 2));
+  return result;
 }
 
 /**
