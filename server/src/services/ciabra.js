@@ -224,7 +224,7 @@ export async function createInvoice(invoiceData) {
     console.log(`✅ [createInvoice] Preço validado: R$ ${priceNumber.toFixed(2)}`);
 
     // Normalizar paymentTypes para o formato esperado pela API:
-    // sempre array de objetos: [{ type: 'PIX' }, { type: 'BOLETO' }]
+    // sempre array de strings: ['PIX'] ou ['BOLETO'] ou ['PIX', 'BOLETO']
     console.log('🟢 [createInvoice] Normalizando paymentTypes...');
     console.log(`🟢 [createInvoice] paymentTypes recebido:`, JSON.stringify(invoiceData.paymentTypes));
     const rawPaymentTypes =
@@ -237,23 +237,32 @@ export async function createInvoice(invoiceData) {
 
     const normalizedPaymentTypes = rawPaymentTypes.map((pt, index) => {
       console.log(`🟢 [createInvoice] Processando paymentType[${index}]:`, JSON.stringify(pt), `(tipo: ${typeof pt})`);
+      // Se for string, usar diretamente
       if (typeof pt === 'string') {
-        const result = { type: pt };
-        console.log(`🟢 [createInvoice] Convertido string para objeto:`, JSON.stringify(result));
-        return result;
+        const upperPt = pt.toUpperCase();
+        if (upperPt !== 'PIX' && upperPt !== 'BOLETO') {
+          console.error(`❌ [createInvoice] paymentType inválido (deve ser PIX ou BOLETO):`, pt);
+          throw new Error(`paymentTypes inválido: ${pt}. Deve ser 'PIX' ou 'BOLETO'`);
+        }
+        console.log(`🟢 [createInvoice] String válida, mantendo: ${upperPt}`);
+        return upperPt;
       }
-      // Se já vier como objeto, garantir que tem a propriedade type
+      // Se já vier como objeto, extrair a propriedade type
       if (pt && typeof pt === 'object' && pt.type) {
-        const result = { type: pt.type };
-        console.log(`🟢 [createInvoice] Objeto já válido, normalizado:`, JSON.stringify(result));
-        return result;
+        const upperPt = String(pt.type).toUpperCase();
+        if (upperPt !== 'PIX' && upperPt !== 'BOLETO') {
+          console.error(`❌ [createInvoice] paymentType inválido (deve ser PIX ou BOLETO):`, pt.type);
+          throw new Error(`paymentTypes inválido: ${pt.type}. Deve ser 'PIX' ou 'BOLETO'`);
+        }
+        console.log(`🟢 [createInvoice] Extraído de objeto: ${upperPt}`);
+        return upperPt;
       }
       console.error(`❌ [createInvoice] paymentType inválido:`, JSON.stringify(pt));
       throw new Error(`paymentTypes inválido: ${JSON.stringify(pt)}`);
     });
-    console.log(`✅ [createInvoice] paymentTypes normalizado:`, JSON.stringify(normalizedPaymentTypes));
+    console.log(`✅ [createInvoice] paymentTypes normalizado (array de strings):`, JSON.stringify(normalizedPaymentTypes));
 
-    // Construir payload base
+    // Construir payload base (exatamente como funcionou no Insomnia)
     console.log('🟢 [createInvoice] Construindo payload base...');
     const payload = {
       customerId: invoiceData.customerId,
@@ -261,22 +270,14 @@ export async function createInvoice(invoiceData) {
       dueDate: invoiceData.dueDate, // ISO 8601 format
       installmentCount: 1,
       invoiceType: 'SINGLE',
-      items: [
-        {
-          description: cleanDescription,
-          quantity: 1,
-          price: priceNumber, // Valor em reais (não centavos)
-        }
-      ],
+      items: [], // Array vazio (como no Insomnia que funcionou)
       price: priceNumber, // Valor em reais (não centavos)
       paymentTypes: normalizedPaymentTypes,
-      // IMPORTANTE: a API do Ciabra parece esperar sempre um array notifications,
-      // caso contrário dá erro interno (reading 'map'). Vamos enviar um conjunto padrão.
+      // Notifications exatamente como no Insomnia (3 itens, sem INVOICE_CONFIRM_PAYMENT)
       notifications: [
         { type: 'INVOICE_GENERATED', channel: 'Email' },
         { type: 'INVOICE_CHANGED', channel: 'Email' },
-        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 },
-        { type: 'INVOICE_CONFIRM_PAYMENT', channel: 'Email' }
+        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 }
       ],
     };
     console.log('🟢 [createInvoice] Payload base montado:', JSON.stringify(payload, null, 2));
@@ -289,6 +290,16 @@ export async function createInvoice(invoiceData) {
     } else {
       console.log('🟢 [createInvoice] externalId não fornecido ou inválido, pulando');
     }
+
+    // Adicionar redirectTo (como no Insomnia que funcionou)
+    console.log('🟢 [createInvoice] Adicionando redirectTo...');
+    const redirectUrl = process.env.DOMAIN && process.env.DOMAIN !== 'localhost'
+      ? `https://${process.env.DOMAIN}`
+      : (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost')
+        ? process.env.FRONTEND_URL
+        : 'https://larparatodoshabitacional.com.br');
+    payload.redirectTo = redirectUrl;
+    console.log(`🟢 [createInvoice] redirectTo adicionado: ${redirectUrl}`);
 
     // Adicionar webhooks apenas se a URL for válida
     console.log('🟢 [createInvoice] Verificando webhooks...');
