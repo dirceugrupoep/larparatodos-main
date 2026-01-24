@@ -2,6 +2,7 @@ import express from 'express';
 import { pool } from '../database/connection.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { z } from 'zod';
+import { createOrGetCustomer } from '../services/ciabra.js';
 
 const router = express.Router();
 
@@ -64,6 +65,13 @@ router.put('/', async (req, res) => {
       [userId]
     );
 
+    // Buscar dados do usuário para criar cliente no Ciabra
+    const userResult = await pool.query(
+      'SELECT id, name, email, phone, ciabra_customer_id FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userResult.rows[0];
+
     if (existingProfile.rows.length === 0) {
       // Criar perfil
       const result = await pool.query(
@@ -86,6 +94,36 @@ router.put('/', async (req, res) => {
           validatedData.monthly_income || null,
         ]
       );
+
+      // Criar cliente no Ciabra se CPF foi fornecido e usuário ainda não tem ciabra_customer_id
+      if (validatedData.cpf && !user.ciabra_customer_id) {
+        (async () => {
+          try {
+            console.log(`🔄 [profile] Criando cliente no Ciabra para usuário ${userId}...`);
+            const ciabraCustomer = await createOrGetCustomer({
+              name: user.name,
+              email: user.email,
+              document: validatedData.cpf.replace(/\D/g, ''), // Remove formatação do CPF
+              phone: user.phone ? (user.phone.startsWith('+') ? user.phone : `+55${user.phone.replace(/\D/g, '')}`) : null,
+              ciabraCustomerId: null, // Novo cliente
+              address: validatedData.address || null,
+              city: validatedData.city || null,
+              state: validatedData.state || null,
+              zipCode: validatedData.zip_code || null,
+            });
+            
+            if (ciabraCustomer && ciabraCustomer.id) {
+              await pool.query(
+                'UPDATE users SET ciabra_customer_id = $1 WHERE id = $2',
+                [ciabraCustomer.id, userId]
+              );
+              console.log(`✅ [profile] Cliente Ciabra criado e salvo: ${ciabraCustomer.id} para usuário ${userId}`);
+            }
+          } catch (error) {
+            console.error(`⚠️ [profile] Erro ao criar cliente no Ciabra (não bloqueia atualização):`, error.message);
+          }
+        })();
+      }
 
       return res.json({
         message: 'Perfil criado com sucesso',
@@ -122,6 +160,37 @@ router.put('/', async (req, res) => {
           userId,
         ]
       );
+
+      // Criar cliente no Ciabra se CPF foi fornecido/atualizado e usuário ainda não tem ciabra_customer_id
+      const finalCpf = validatedData.cpf || result.rows[0]?.cpf;
+      if (finalCpf && !user.ciabra_customer_id) {
+        (async () => {
+          try {
+            console.log(`🔄 [profile] Criando cliente no Ciabra para usuário ${userId}...`);
+            const ciabraCustomer = await createOrGetCustomer({
+              name: user.name,
+              email: user.email,
+              document: finalCpf.replace(/\D/g, ''), // Remove formatação do CPF
+              phone: user.phone ? (user.phone.startsWith('+') ? user.phone : `+55${user.phone.replace(/\D/g, '')}`) : null,
+              ciabraCustomerId: null, // Novo cliente
+              address: validatedData.address || result.rows[0]?.address || null,
+              city: validatedData.city || result.rows[0]?.city || null,
+              state: validatedData.state || result.rows[0]?.state || null,
+              zipCode: validatedData.zip_code || result.rows[0]?.zip_code || null,
+            });
+            
+            if (ciabraCustomer && ciabraCustomer.id) {
+              await pool.query(
+                'UPDATE users SET ciabra_customer_id = $1 WHERE id = $2',
+                [ciabraCustomer.id, userId]
+              );
+              console.log(`✅ [profile] Cliente Ciabra criado e salvo: ${ciabraCustomer.id} para usuário ${userId}`);
+            }
+          } catch (error) {
+            console.error(`⚠️ [profile] Erro ao criar cliente no Ciabra (não bloqueia atualização):`, error.message);
+          }
+        })();
+      }
 
       return res.json({
         message: 'Perfil atualizado com sucesso',

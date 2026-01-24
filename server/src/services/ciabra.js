@@ -121,12 +121,20 @@ export async function createOrGetCustomer(customerData) {
     console.log('🔵 [createOrGetCustomer] Processando dados do cliente...');
     const cleanDocument = customerData.document?.replace(/\D/g, '');
     const cleanPhone = customerData.phone ? `+55${customerData.phone.replace(/\D/g, '')}` : undefined;
-    console.log(`🔵 [createOrGetCustomer] Documento limpo: ${cleanDocument}`);
+    console.log(`🔵 [createOrGetCustomer] Documento limpo: ${cleanDocument || 'NÃO FORNECIDO'}`);
     console.log(`🔵 [createOrGetCustomer] Telefone formatado: ${cleanPhone || 'não fornecido'}`);
+
+    // IMPORTANTE: O Ciabra exige document (CPF) para criar cliente
+    // Se não tiver documento, não podemos criar o cliente
+    if (!cleanDocument || cleanDocument.length < 11) {
+      const error = new Error('CPF é obrigatório para criar cliente no Ciabra. Por favor, preencha o CPF no seu perfil antes de gerar cobranças.');
+      error.code = 'CPF_REQUIRED';
+      throw error;
+    }
 
     const payload = {
       fullName: customerData.name,
-      document: cleanDocument,
+      document: cleanDocument, // SEMPRE presente agora (validado acima)
       email: customerData.email || undefined,
       phone: cleanPhone,
       address,
@@ -134,10 +142,10 @@ export async function createOrGetCustomer(customerData) {
 
     console.log('🔵 [createOrGetCustomer] Payload inicial montado:', JSON.stringify(payload, null, 2));
 
-    // Remover campos undefined/null
+    // Remover campos undefined/null (mas NUNCA remover document, pois é obrigatório)
     console.log('🔵 [createOrGetCustomer] Removendo campos undefined/null...');
     Object.keys(payload).forEach((key) => {
-      if (payload[key] === undefined || payload[key] === null) {
+      if (key !== 'document' && (payload[key] === undefined || payload[key] === null)) {
         console.log(`🔵 [createOrGetCustomer] Removendo campo vazio: ${key}`);
         delete payload[key];
       }

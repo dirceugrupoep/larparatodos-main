@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../database/connection.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { z } from 'zod';
+import { createOrGetCustomer } from '../services/ciabra.js';
 
 const router = express.Router();
 
@@ -87,6 +88,37 @@ router.post('/', async (req, res) => {
         'INSERT INTO user_profiles (user_id, cpf) VALUES ($1, $2)',
         [user.id, cpf]
       );
+
+      // Criar cliente no Ciabra (assíncrono - não bloqueia o cadastro se falhar)
+      // Isso garante que o ciabra_customer_id esteja salvo para uso futuro
+      (async () => {
+        try {
+          console.log(`🔄 [contact] Criando cliente no Ciabra para usuário ${user.id}...`);
+          const ciabraCustomer = await createOrGetCustomer({
+            name: name,
+            email: email,
+            document: cpf.replace(/\D/g, ''), // Remove formatação do CPF
+            phone: phone ? (phone.startsWith('+') ? phone : `+55${phone.replace(/\D/g, '')}`) : null,
+            ciabraCustomerId: null, // Novo cliente
+            address: null,
+            city: null,
+            state: null,
+            zipCode: null,
+          });
+          
+          if (ciabraCustomer && ciabraCustomer.id) {
+            // Salvar ciabra_customer_id no banco
+            await pool.query(
+              'UPDATE users SET ciabra_customer_id = $1 WHERE id = $2',
+              [ciabraCustomer.id, user.id]
+            );
+            console.log(`✅ [contact] Cliente Ciabra criado e salvo: ${ciabraCustomer.id} para usuário ${user.id}`);
+          }
+        } catch (error) {
+          // Não bloqueia o cadastro se falhar ao criar no Ciabra
+          console.error(`⚠️ [contact] Erro ao criar cliente no Ciabra (não bloqueia cadastro):`, error.message);
+        }
+      })();
 
       // Criar contato
       const contactResult = await pool.query(

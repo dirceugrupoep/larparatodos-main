@@ -591,6 +591,15 @@ router.post('/charges', authenticateToken, async (req, res) => {
     // Formatar data de forma simples para a descrição
     const dueDateFormatted = new Date(payment.due_date).toLocaleDateString('pt-BR');
     
+    // IMPORTANTE: Verificar se o usuário tem CPF antes de criar cobrança
+    // O Ciabra exige CPF para criar cliente e invoice
+    if (!payment.cpf || payment.cpf.trim().length < 11) {
+      return res.status(400).json({ 
+        error: 'CPF é obrigatório para gerar cobranças. Por favor, preencha o CPF no seu perfil antes de gerar cobranças.',
+        code: 'CPF_REQUIRED'
+      });
+    }
+
     // IMPORTANTE: Buscar o ciabra_customer_id mais recente do banco ANTES de criar a invoice
     // Isso evita criar múltiplos clientes
     const userCheckResult = await pool.query(
@@ -600,6 +609,7 @@ router.post('/charges', authenticateToken, async (req, res) => {
     const customerIdFromDb = userCheckResult.rows[0]?.ciabra_customer_id || payment.ciabraCustomerId || null;
     
     console.log(`🔍 [ciabra/charges] ciabra_customer_id do banco: ${customerIdFromDb || 'não encontrado'}`);
+    console.log(`🔍 [ciabra/charges] CPF do usuário: ${payment.cpf ? payment.cpf.replace(/\D/g, '').substring(0, 3) + '***' : 'NÃO FORNECIDO'}`);
     
     // Passar o ciabra_customer_id para o createCharge, que vai criar o cliente se necessário
     // e retornar o customerId na resposta para salvarmos no banco
@@ -610,7 +620,7 @@ router.post('/charges', authenticateToken, async (req, res) => {
       customer: {
         name: payment.name,
         email: payment.email,
-        document: payment.cpf,
+        document: payment.cpf.replace(/\D/g, ''), // Garantir que está limpo (apenas números)
         phone: payment.phone,
         ciabraCustomerId: customerIdFromDb, // Passar o ID do banco para reutilizar
         address: payment.address,
