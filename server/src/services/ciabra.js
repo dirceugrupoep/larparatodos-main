@@ -327,114 +327,50 @@ export async function createInvoice(invoiceData) {
 
     // Construir payload base (exatamente como funcionou no Insomnia)
     // IMPORTANTE: Ordem dos campos igual ao Insomnia
-    console.log('🟢 [createInvoice] Construindo payload base...');
-    const payload = {
-      customerId: invoiceData.customerId,
-      description: cleanDescription,
-      dueDate: invoiceData.dueDate, // ISO 8601 format
-      installmentCount: 1,
-      invoiceType: 'SINGLE',
-      items: [], // Array vazio (como no Insomnia que funcionou)
-      price: priceNumber, // Valor em reais (não centavos)
-      // externalId será adicionado depois (se existir)
-      paymentTypes: normalizedPaymentTypes,
-      // Notifications exatamente como no Insomnia (3 itens, sem INVOICE_CONFIRM_PAYMENT)
-      notifications: [
-        { type: 'INVOICE_GENERATED', channel: 'Email' },
-        { type: 'INVOICE_CHANGED', channel: 'Email' },
-        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 } // Número inteiro, não parseInt
-      ],
-      // redirectTo será adicionado depois
-      // webhooks serão adicionados depois
-    };
-    console.log('🟢 [createInvoice] Payload base montado:', JSON.stringify(payload, null, 2));
-
-    // Adicionar externalId apenas se fornecido e válido
-    console.log('🟢 [createInvoice] Verificando externalId...');
-    if (invoiceData.externalId && invoiceData.externalId.toString().trim()) {
-      payload.externalId = invoiceData.externalId.toString().trim();
-      console.log(`🟢 [createInvoice] externalId adicionado: ${payload.externalId}`);
-    } else {
-      console.log('🟢 [createInvoice] externalId não fornecido ou inválido, pulando');
-    }
-
-    // Adicionar redirectTo (como no Insomnia que funcionou)
-    console.log('🟢 [createInvoice] Adicionando redirectTo...');
+    // Construir payload EXATAMENTE como no Insomnia que funciona
+    // Ordem: customerId, description, dueDate, installmentCount, invoiceType, items, price, externalId, paymentTypes, notifications, redirectTo, webhooks
+    console.log('🟢 [createInvoice] Construindo payload EXATAMENTE como no Insomnia...');
+    
     const redirectUrl = process.env.DOMAIN && process.env.DOMAIN !== 'localhost'
       ? `https://${process.env.DOMAIN}`
       : (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost')
         ? process.env.FRONTEND_URL
         : 'https://larparatodoshabitacional.com.br');
-    payload.redirectTo = redirectUrl;
-    console.log(`🟢 [createInvoice] redirectTo adicionado: ${redirectUrl}`);
-
-    // Adicionar webhooks apenas se a URL for válida (exatamente como no Insomnia)
-    console.log('🟢 [createInvoice] Verificando webhooks...');
-    if (webhookUrl && webhookUrl.startsWith('http')) {
-      payload.webhooks = [
-        {
-          hookType: 'INVOICE_CREATED',
-          url: webhookUrl,
-        },
-        {
-          hookType: 'PAYMENT_GENERATED',
-          url: webhookUrl,
-        },
-        {
-          hookType: 'PAYMENT_CONFIRMED',
-          url: webhookUrl,
-        },
-      ];
-      console.log(`🟢 [createInvoice] Webhooks adicionados:`, JSON.stringify(payload.webhooks, null, 2));
-    } else {
-      console.log('🟢 [createInvoice] URL do webhook inválida, pulando webhooks');
-    }
-
-    // Remover campos undefined (não deve ter nenhum agora, mas por segurança)
-    console.log('🟢 [createInvoice] Removendo campos undefined/null...');
-    Object.keys(payload).forEach(key => {
-      if (payload[key] === undefined || payload[key] === null) {
-        console.log(`🟢 [createInvoice] Removendo campo vazio: ${key}`);
-        delete payload[key];
-      }
-    });
-
-    // Garantir ordem final igual ao Insomnia: customerId, description, dueDate, installmentCount, invoiceType, items, price, externalId, paymentTypes, notifications, redirectTo, webhooks
+    
+    // Payload EXATO do Insomnia - mesma ordem e estrutura
+    // Construir objeto limpo, sem campos undefined
     const finalPayload = {
-      customerId: payload.customerId,
-      description: payload.description,
-      dueDate: payload.dueDate,
-      installmentCount: payload.installmentCount,
-      invoiceType: payload.invoiceType,
-      items: payload.items,
-      price: payload.price,
+      customerId: invoiceData.customerId,
+      description: cleanDescription,
+      dueDate: invoiceData.dueDate,
+      installmentCount: 1,
+      invoiceType: 'SINGLE',
+      items: [],
+      price: priceNumber,
+      paymentTypes: normalizedPaymentTypes,
+      notifications: [
+        { type: 'INVOICE_GENERATED', channel: 'Email' },
+        { type: 'INVOICE_CHANGED', channel: 'Email' },
+        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 }
+      ],
+      redirectTo: redirectUrl
     };
     
-    // Adicionar externalId se existir
-    if (payload.externalId) {
-      finalPayload.externalId = payload.externalId;
+    // Adicionar externalId apenas se existir e for válido
+    if (invoiceData.externalId && invoiceData.externalId.toString().trim()) {
+      finalPayload.externalId = invoiceData.externalId.toString().trim();
     }
     
-    // Adicionar paymentTypes
-    finalPayload.paymentTypes = payload.paymentTypes;
-    
-    // Adicionar notifications
-    finalPayload.notifications = payload.notifications;
-    
-    // Adicionar redirectTo se existir
-    if (payload.redirectTo) {
-      finalPayload.redirectTo = payload.redirectTo;
-    }
-    
-    // Adicionar webhooks se existirem
-    if (payload.webhooks && payload.webhooks.length > 0) {
-      finalPayload.webhooks = payload.webhooks;
+    // Adicionar webhooks apenas se a URL for válida
+    if (webhookUrl && webhookUrl.startsWith('http')) {
+      finalPayload.webhooks = [
+        { hookType: 'INVOICE_CREATED', url: webhookUrl },
+        { hookType: 'PAYMENT_GENERATED', url: webhookUrl },
+        { hookType: 'PAYMENT_CONFIRMED', url: webhookUrl }
+      ];
     }
 
-    console.log(`📤 [createInvoice] Enviando requisição para criar invoice`);
-    console.log(`📤 [createInvoice] Cliente ID: ${invoiceData.customerId}`);
-    console.log(`📤 [createInvoice] URL: ${CIABRA_API_URL}/invoices/applications/invoices`);
-    console.log(`📤 [createInvoice] Payload final completo (ordenado):`, JSON.stringify(finalPayload, null, 2));
+    console.log(`📤 [createInvoice] Payload final (exatamente como Insomnia):`, JSON.stringify(finalPayload, null, 2));
     
     // Log do JSON exato que será enviado (sem espaços, para comparar byte a byte)
     const jsonString = JSON.stringify(finalPayload);
@@ -444,7 +380,6 @@ export async function createInvoice(invoiceData) {
       'Content-Type': 'application/json',
       'Authorization': authToken.substring(0, 20) + '...',
       'Accept': 'application/json',
-      'User-Agent': 'Larparatodos-Backend/1.0',
     });
 
     const response = await fetch(`${CIABRA_API_URL}/invoices/applications/invoices`, {
@@ -453,7 +388,6 @@ export async function createInvoice(invoiceData) {
         'Content-Type': 'application/json',
         'Authorization': authToken,
         'Accept': 'application/json',
-        'User-Agent': 'Larparatodos-Backend/1.0',
       },
       body: jsonString,
     });
