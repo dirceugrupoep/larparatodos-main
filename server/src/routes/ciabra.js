@@ -391,6 +391,48 @@ router.post('/charges', authenticateToken, async (req, res) => {
 
     console.log('📋 [ciabra/charges] Resposta da invoice criada:', JSON.stringify(chargeData, null, 2));
     
+    // Verificar se é uma resposta parcial (erro 500 mas invoice pode ter sido criada)
+    if (chargeData._partial) {
+      console.warn('⚠️ [ciabra/charges] Resposta parcial recebida. Invoice pode ter sido criada no Ciabra, mas dados não estão disponíveis ainda.');
+      console.warn(`⚠️ [ciabra/charges] Mensagem: ${chargeData._error || 'Aguarde o webhook ou verifique no painel do Ciabra'}`);
+      
+      // Salvar customerId no usuário se disponível
+      if (chargeData.customerId && userId) {
+        try {
+          await pool.query(
+            `UPDATE users 
+             SET ciabra_customer_id = $1
+             WHERE id = $2 AND ciabra_customer_id IS NULL`,
+            [chargeData.customerId, userId]
+          );
+          console.log(`✅ Salvo ciabra_customer_id ${chargeData.customerId} para usuário ${userId}`);
+        } catch (error) {
+          console.error('❌ Erro ao salvar ciabra_customer_id:', error);
+        }
+      }
+      
+      // Retornar resposta parcial para o frontend
+      res.json({
+        message: 'Cobrança pode ter sido criada, mas dados não estão disponíveis ainda',
+        warning: chargeData._error || 'A invoice pode ter sido criada no Ciabra. Aguarde o webhook ou verifique no painel.',
+        charge: chargeData,
+        payment: {
+          id: payment.id,
+          amount: payment.amount,
+          due_date: payment.due_date,
+          status: payment.status,
+          ciabra_charge_id: null,
+          ciabra_pix_qr_code: null,
+          ciabra_pix_qr_code_url: null,
+          ciabra_boleto_url: null,
+          payment_url: null,
+          installment_id: null,
+        },
+        partial: true,
+      });
+      return;
+    }
+    
     // Pegar o installmentId da resposta da invoice criada
     const installments = chargeData.installments || [];
     console.log(`📋 [ciabra/charges] Installments encontrados: ${installments.length}`);
