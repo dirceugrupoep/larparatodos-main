@@ -441,6 +441,24 @@ export const ciabraApi = {
 
     return response.json();
   },
+
+  async getPaymentData(paymentId: number) {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+
+    const response = await fetch(`${API_URL}/api/ciabra/charges/${paymentId}/payment-data`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Erro ao buscar dados de pagamento');
+    }
+
+    return response.json();
+  },
 };
 
 

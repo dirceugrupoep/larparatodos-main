@@ -23,74 +23,137 @@ router.get('/check', async (req, res) => {
  * Webhook para receber notificações do Ciabra
  */
 router.post('/webhook', express.json(), async (req, res) => {
+  const timestamp = new Date().toISOString();
+  const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+  
   try {
+    // Log completo de headers
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log(`📨 [WEBHOOK] Nova requisição recebida - ${timestamp}`);
+    console.log(`📍 [WEBHOOK] IP do cliente: ${clientIp}`);
+    console.log(`📋 [WEBHOOK] Headers recebidos:`, JSON.stringify(req.headers, null, 2));
+    
     const signature = req.headers['x-ciabra-signature'] || req.headers['x-signature'];
     const payload = req.body;
 
-    // Log completo do payload recebido para debug
-    console.log('📨 Webhook recebido do Ciabra - Payload completo:', JSON.stringify(payload, null, 2));
-    console.log('📨 Webhook recebido do Ciabra - Resumo:', {
-      event: payload.event || payload.type || 'unknown',
-      chargeId: payload.id || payload.charge_id || payload.data?.id || payload.charge?.id,
-      status: payload.status || payload.data?.status || payload.charge?.status,
+    // Log completo do payload recebido
+    console.log(`📦 [WEBHOOK] Payload completo (raw):`, JSON.stringify(payload, null, 2));
+    console.log(`📦 [WEBHOOK] Tipo do payload:`, typeof payload);
+    console.log(`📦 [WEBHOOK] Chaves do payload:`, Object.keys(payload || {}));
+    
+    // Log resumido com informações principais
+    const eventType = payload.event || payload.type || payload.hookType || 'unknown';
+    const invoiceId = payload.id || payload.charge_id || payload.data?.id || payload.charge?.id || payload.invoiceId || payload.invoice?.id;
+    const status = payload.status || payload.data?.status || payload.charge?.status || payload.invoice?.status;
+    const externalId = payload.externalId || payload.invoice?.externalId || payload.data?.externalId;
+    
+    console.log(`📊 [WEBHOOK] Resumo do evento:`, {
+      eventType,
+      invoiceId,
+      status,
+      externalId,
+      signature: signature ? 'presente' : 'ausente',
     });
 
     // Verificar assinatura (opcional - Ciabra pode não enviar)
-    if (signature && !verifyWebhookSignature(signature, payload)) {
-      console.warn('⚠️  Webhook com assinatura inválida:', signature);
-      return res.status(401).json({ error: 'Assinatura inválida' });
+    console.log(`🔐 [WEBHOOK] Verificando assinatura...`);
+    if (signature) {
+      console.log(`🔐 [WEBHOOK] Assinatura recebida: ${signature.substring(0, 20)}...`);
+      if (!verifyWebhookSignature(signature, payload)) {
+        console.error(`❌ [WEBHOOK] Assinatura inválida!`);
+        console.error(`❌ [WEBHOOK] Payload que causou erro:`, JSON.stringify(payload, null, 2));
+        return res.status(401).json({ error: 'Assinatura inválida' });
+      }
+      console.log(`✅ [WEBHOOK] Assinatura válida`);
+    } else {
+      console.log(`⚠️  [WEBHOOK] Nenhuma assinatura recebida (pode ser normal)`);
     }
 
     // Processar webhook
+    console.log(`🔄 [WEBHOOK] Processando payload...`);
     const webhookData = processWebhook(payload);
-    const { eventType, invoiceId, chargeId, status, paidAt, amount, pixQrCode, pixQrCodeUrl, boletoUrl, externalId } = webhookData;
+    console.log(`✅ [WEBHOOK] Dados processados:`, JSON.stringify(webhookData, null, 2));
+    
+    const { eventType: processedEventType, invoiceId: processedInvoiceId, chargeId, status: processedStatus, paidAt, amount, pixQrCode, pixQrCodeUrl, boletoUrl, externalId: processedExternalId } = webhookData;
 
     // Usar invoiceId ou chargeId (são a mesma coisa)
-    const invoiceIdToSearch = invoiceId || chargeId;
+    const invoiceIdToSearch = processedInvoiceId || chargeId;
 
-    console.log(`📋 Processando evento: ${eventType}, invoiceId: ${invoiceIdToSearch}, status: ${status}`);
+    console.log(`📋 [WEBHOOK] Dados extraídos:`, {
+      eventType: processedEventType,
+      invoiceId: invoiceIdToSearch,
+      chargeId,
+      status: processedStatus,
+      paidAt,
+      amount,
+      externalId: processedExternalId,
+      hasPixQrCode: !!pixQrCode,
+      hasPixQrCodeUrl: !!pixQrCodeUrl,
+      hasBoletoUrl: !!boletoUrl,
+    });
 
     if (!invoiceIdToSearch) {
-      console.warn('⚠️  Webhook sem invoice_id:', payload);
+      console.warn(`⚠️  [WEBHOOK] invoice_id não encontrado no payload`);
+      console.warn(`⚠️  [WEBHOOK] Tentando buscar pelo externalId...`);
       // Tentar buscar pelo externalId se disponível
-      const externalId = payload.externalId || payload.invoice?.externalId;
+      const externalId = processedExternalId || payload.externalId || payload.invoice?.externalId;
       if (externalId) {
+        console.log(`🔍 [WEBHOOK] Buscando pagamento pelo externalId: ${externalId}`);
         const paymentByExternalId = await pool.query(
-          'SELECT id, user_id, status FROM payments WHERE id = $1',
+          'SELECT id, user_id, status, ciabra_charge_id FROM payments WHERE id = $1',
           [externalId]
         );
+        console.log(`📊 [WEBHOOK] Resultado da busca por externalId:`, {
+          encontrado: paymentByExternalId.rows.length > 0,
+          dados: paymentByExternalId.rows[0] || null,
+        });
         if (paymentByExternalId.rows.length > 0) {
           // Continuar processamento com payment encontrado
           const payment = paymentByExternalId.rows[0];
           // Atualizar ciabra_charge_id se não tiver
-          if (!payment.ciabra_charge_id) {
+          const possibleInvoiceId = payload.invoiceId || payload.id || payload.invoice?.id;
+          if (!payment.ciabra_charge_id && possibleInvoiceId) {
+            console.log(`💾 [WEBHOOK] Atualizando ciabra_charge_id para payment ${payment.id}: ${possibleInvoiceId}`);
             await pool.query(
               'UPDATE payments SET ciabra_charge_id = $1 WHERE id = $2',
-              [invoiceIdToSearch || payload.invoiceId || payload.id, payment.id]
+              [possibleInvoiceId, payment.id]
             );
           }
         } else {
+          console.warn(`⚠️  [WEBHOOK] Pagamento não encontrado pelo externalId: ${externalId}`);
           return res.status(200).json({ message: 'Pagamento não encontrado (pode ser teste ou cobrança externa)' });
         }
       } else {
+        console.error(`❌ [WEBHOOK] invoice_id e externalId não encontrados no payload`);
         return res.status(400).json({ error: 'invoice_id não encontrado no webhook' });
       }
     }
 
     // Buscar pagamento pelo charge_id (invoice_id) ou external_id
+    console.log(`🔍 [WEBHOOK] Buscando pagamento pelo ciabra_charge_id: ${invoiceIdToSearch}`);
     let paymentResult = await pool.query(
-      'SELECT id, user_id, status FROM payments WHERE ciabra_charge_id = $1',
+      'SELECT id, user_id, status, ciabra_charge_id, amount, due_date FROM payments WHERE ciabra_charge_id = $1',
       [invoiceIdToSearch]
     );
+    console.log(`📊 [WEBHOOK] Resultado da busca por ciabra_charge_id:`, {
+      encontrado: paymentResult.rows.length > 0,
+      dados: paymentResult.rows[0] || null,
+    });
 
     // Se não encontrou pelo charge_id, tentar pelo external_id (nosso payment_id)
-    if (paymentResult.rows.length === 0 && externalId) {
+    if (paymentResult.rows.length === 0 && processedExternalId) {
+      console.log(`🔍 [WEBHOOK] Não encontrado pelo ciabra_charge_id, tentando pelo externalId: ${processedExternalId}`);
       paymentResult = await pool.query(
-        'SELECT id, user_id, status FROM payments WHERE id = $1',
-        [externalId]
+        'SELECT id, user_id, status, ciabra_charge_id, amount, due_date FROM payments WHERE id = $1',
+        [processedExternalId]
       );
+      console.log(`📊 [WEBHOOK] Resultado da busca por externalId:`, {
+        encontrado: paymentResult.rows.length > 0,
+        dados: paymentResult.rows[0] || null,
+      });
       // Se encontrou pelo externalId, atualizar o ciabra_charge_id
       if (paymentResult.rows.length > 0 && invoiceIdToSearch) {
+        console.log(`💾 [WEBHOOK] Atualizando ciabra_charge_id para payment ${paymentResult.rows[0].id}: ${invoiceIdToSearch}`);
         await pool.query(
           'UPDATE payments SET ciabra_charge_id = $1 WHERE id = $2',
           [invoiceIdToSearch, paymentResult.rows[0].id]
@@ -99,51 +162,105 @@ router.post('/webhook', express.json(), async (req, res) => {
     }
 
     if (paymentResult.rows.length === 0) {
-      console.warn(`⚠️  Pagamento não encontrado para charge_id: ${chargeId} (pode ser teste ou cobrança externa)`);
+      console.warn(`⚠️  [WEBHOOK] Pagamento não encontrado para invoice_id: ${invoiceIdToSearch}`);
+      console.warn(`⚠️  [WEBHOOK] externalId tentado: ${processedExternalId || 'não fornecido'}`);
       // Retornar 200 para não causar retry do Ciabra
       return res.status(200).json({ message: 'Pagamento não encontrado (pode ser teste ou cobrança externa)' });
     }
 
     const payment = paymentResult.rows[0];
+    console.log(`✅ [WEBHOOK] Pagamento encontrado:`, {
+      paymentId: payment.id,
+      userId: payment.user_id,
+      statusAtual: payment.status,
+      ciabraChargeId: payment.ciabra_charge_id,
+      amount: payment.amount,
+      dueDate: payment.due_date,
+    });
 
     // Processar cada tipo de evento especificamente
+    console.log(`🔄 [WEBHOOK] Preparando dados para atualização...`);
     const updateData = {
       updated_at: new Date(),
     };
 
     // Processar baseado no tipo de evento do Ciabra
     // Tipos: INVOICE_CREATED, INVOICE_DELETED, PAYMENT_GENERATED, PAYMENT_CONFIRMED, PAYMENT_RECEIVED, PAYMENT_REFUNDED
-    if (eventType === 'INVOICE_CREATED' || eventType.includes('INVOICE_CREATED')) {
+    console.log(`🎯 [WEBHOOK] Processando evento: ${processedEventType}`);
+    
+    if (processedEventType === 'INVOICE_CREATED' || processedEventType.includes('INVOICE_CREATED')) {
       // Invoice criada: Atualizar com dados iniciais (PIX/Boleto)
-      console.log('📦 Evento: Invoice criada');
-      if (pixQrCode) updateData.ciabra_pix_qr_code = pixQrCode;
-      if (pixQrCodeUrl) updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
-      if (boletoUrl) updateData.ciabra_boleto_url = boletoUrl;
-      if (status) updateData.status = status;
+      console.log(`📦 [WEBHOOK] Evento: Invoice criada`);
+      console.log(`📦 [WEBHOOK] Dados disponíveis:`, {
+        hasPixQrCode: !!pixQrCode,
+        hasPixQrCodeUrl: !!pixQrCodeUrl,
+        hasBoletoUrl: !!boletoUrl,
+        status: processedStatus,
+      });
+      if (pixQrCode) {
+        updateData.ciabra_pix_qr_code = pixQrCode;
+        console.log(`💾 [WEBHOOK] Adicionando PIX QR Code (${pixQrCode.length} caracteres)`);
+      }
+      if (pixQrCodeUrl) {
+        updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
+        console.log(`💾 [WEBHOOK] Adicionando PIX QR Code URL: ${pixQrCodeUrl}`);
+      }
+      if (boletoUrl) {
+        updateData.ciabra_boleto_url = boletoUrl;
+        console.log(`💾 [WEBHOOK] Adicionando Boleto URL: ${boletoUrl}`);
+      }
+      if (processedStatus) {
+        updateData.status = processedStatus;
+        console.log(`💾 [WEBHOOK] Atualizando status para: ${processedStatus}`);
+      }
     }
-    else if (eventType === 'INVOICE_DELETED' || eventType.includes('INVOICE_DELETED')) {
+    else if (processedEventType === 'INVOICE_DELETED' || processedEventType.includes('INVOICE_DELETED')) {
       // Invoice deletada: Marcar como cancelado
-      console.log('🗑️  Evento: Invoice deletada');
+      console.log(`🗑️  [WEBHOOK] Evento: Invoice deletada`);
       updateData.status = 'cancelled';
+      console.log(`💾 [WEBHOOK] Atualizando status para: cancelled`);
     }
-    else if (eventType === 'PAYMENT_GENERATED' || eventType.includes('PAYMENT_GENERATED')) {
+    else if (processedEventType === 'PAYMENT_GENERATED' || processedEventType.includes('PAYMENT_GENERATED')) {
       // Pagamento gerado: Atualizar QR Code PIX ou URL do boleto
-      console.log('💳 Evento: Pagamento gerado');
-      if (pixQrCode) updateData.ciabra_pix_qr_code = pixQrCode;
-      if (pixQrCodeUrl) updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
-      if (boletoUrl) updateData.ciabra_boleto_url = boletoUrl;
+      console.log(`💳 [WEBHOOK] Evento: Pagamento gerado`);
+      console.log(`💳 [WEBHOOK] Dados disponíveis:`, {
+        hasPixQrCode: !!pixQrCode,
+        hasPixQrCodeUrl: !!pixQrCodeUrl,
+        hasBoletoUrl: !!boletoUrl,
+      });
+      if (pixQrCode) {
+        updateData.ciabra_pix_qr_code = pixQrCode;
+        console.log(`💾 [WEBHOOK] Adicionando PIX QR Code (${pixQrCode.length} caracteres)`);
+      }
+      if (pixQrCodeUrl) {
+        updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
+        console.log(`💾 [WEBHOOK] Adicionando PIX QR Code URL: ${pixQrCodeUrl}`);
+      }
+      if (boletoUrl) {
+        updateData.ciabra_boleto_url = boletoUrl;
+        console.log(`💾 [WEBHOOK] Adicionando Boleto URL: ${boletoUrl}`);
+      }
     }
-    else if (eventType === 'PAYMENT_CONFIRMED' || eventType === 'PAYMENT_RECEIVED' || eventType.includes('PAYMENT_CONFIRMED') || status === 'paid') {
+    else if (processedEventType === 'PAYMENT_CONFIRMED' || processedEventType === 'PAYMENT_RECEIVED' || processedEventType.includes('PAYMENT_CONFIRMED') || processedStatus === 'paid') {
       // Pagamento confirmado/recebido: Marcar como pago e atualizar data
-      console.log('✅ Evento: Pagamento confirmado/recebido');
+      console.log(`✅ [WEBHOOK] Evento: Pagamento confirmado/recebido`);
+      console.log(`✅ [WEBHOOK] Dados do pagamento:`, {
+        paidAt,
+        amount,
+        status: processedStatus,
+      });
       updateData.status = 'paid';
       if (paidAt) {
         updateData.paid_date = new Date(paidAt);
+        console.log(`💾 [WEBHOOK] Atualizando paid_date para: ${paidAt}`);
       } else {
         updateData.paid_date = new Date(); // Se não veio a data, usar agora
+        console.log(`💾 [WEBHOOK] Atualizando paid_date para: agora (não veio no payload)`);
       }
+      console.log(`💾 [WEBHOOK] Atualizando status para: paid`);
 
       // Verificar se o usuário ainda tem outros pagamentos vencidos
+      console.log(`🔍 [WEBHOOK] Verificando se usuário ${payment.user_id} tem outros pagamentos vencidos...`);
       const overdueCheck = await pool.query(
         `SELECT COUNT(*) as count 
          FROM payments 
@@ -153,30 +270,45 @@ router.post('/webhook', express.json(), async (req, res) => {
            AND due_date < CURRENT_DATE`,
         [payment.user_id, payment.id]
       );
+      const overdueCount = parseInt(overdueCheck.rows[0].count);
+      console.log(`📊 [WEBHOOK] Pagamentos vencidos restantes: ${overdueCount}`);
 
       // Se não tem mais vencidos, o usuário volta a ser adimplente
-      if (parseInt(overdueCheck.rows[0].count) === 0) {
-        console.log(`✅ Usuário ${payment.user_id} voltou a ser adimplente`);
+      if (overdueCount === 0) {
+        console.log(`✅ [WEBHOOK] Usuário ${payment.user_id} voltou a ser adimplente!`);
+      } else {
+        console.log(`⚠️  [WEBHOOK] Usuário ${payment.user_id} ainda tem ${overdueCount} pagamento(s) vencido(s)`);
       }
     }
-    else if (eventType === 'PAYMENT_REFUNDED' || eventType.includes('PAYMENT_REFUNDED')) {
+    else if (processedEventType === 'PAYMENT_REFUNDED' || processedEventType.includes('PAYMENT_REFUNDED')) {
       // Pagamento estornado: Marcar como cancelado
-      console.log('🔄 Evento: Pagamento estornado');
+      console.log(`🔄 [WEBHOOK] Evento: Pagamento estornado`);
       updateData.status = 'cancelled';
+      console.log(`💾 [WEBHOOK] Atualizando status para: cancelled`);
     }
     else {
       // Evento genérico: Atualizar status e dados se fornecidos
-      console.log(`📝 Evento genérico: ${eventType}`);
-      if (status) updateData.status = status;
+      console.log(`📝 [WEBHOOK] Evento genérico: ${processedEventType}`);
+      console.log(`📝 [WEBHOOK] Dados disponíveis para atualização:`, {
+        status: processedStatus,
+        hasPixQrCode: !!pixQrCode,
+        hasPixQrCodeUrl: !!pixQrCodeUrl,
+        hasBoletoUrl: !!boletoUrl,
+        paidAt,
+      });
+      if (processedStatus) updateData.status = processedStatus;
       if (pixQrCode) updateData.ciabra_pix_qr_code = pixQrCode;
       if (pixQrCodeUrl) updateData.ciabra_pix_qr_code_url = pixQrCodeUrl;
       if (boletoUrl) updateData.ciabra_boleto_url = boletoUrl;
-      if (status === 'paid' && paidAt) {
+      if (processedStatus === 'paid' && paidAt) {
         updateData.paid_date = new Date(paidAt);
       }
     }
 
     // Construir query de update dinamicamente
+    console.log(`🔧 [WEBHOOK] Construindo query de atualização...`);
+    console.log(`🔧 [WEBHOOK] Dados a serem atualizados:`, JSON.stringify(updateData, null, 2));
+    
     const updateFields = [];
     const updateValues = [];
     let paramIndex = 1;
@@ -189,6 +321,11 @@ router.post('/webhook', express.json(), async (req, res) => {
       }
     });
 
+    if (updateFields.length === 0) {
+      console.warn(`⚠️  [WEBHOOK] Nenhum campo para atualizar! Retornando sucesso sem atualização.`);
+      return res.status(200).json({ message: 'Webhook recebido, mas nenhum dado para atualizar' });
+    }
+
     updateValues.push(payment.id);
     const updateQuery = `
       UPDATE payments 
@@ -196,15 +333,29 @@ router.post('/webhook', express.json(), async (req, res) => {
       WHERE id = $${paramIndex}
       RETURNING *
     `;
+    
+    console.log(`💾 [WEBHOOK] Executando query de atualização:`);
+    console.log(`💾 [WEBHOOK] Query:`, updateQuery);
+    console.log(`💾 [WEBHOOK] Valores:`, updateValues);
 
-    await pool.query(updateQuery, updateValues);
+    const updateResult = await pool.query(updateQuery, updateValues);
+    console.log(`✅ [WEBHOOK] Query executada com sucesso!`);
+    console.log(`✅ [WEBHOOK] Dados atualizados:`, JSON.stringify(updateResult.rows[0], null, 2));
+    console.log(`✅ [WEBHOOK] Pagamento ${payment.id} atualizado com sucesso`);
 
-    console.log(`✅ Pagamento ${payment.id} atualizado para status: ${status}`);
+    console.log(`═══════════════════════════════════════════════════════════`);
+    console.log(`✅ [WEBHOOK] Webhook processado com sucesso - ${timestamp}`);
+    console.log(`═══════════════════════════════════════════════════════════`);
 
     res.json({ success: true, message: 'Webhook processado com sucesso' });
   } catch (error) {
-    console.error('Erro ao processar webhook do Ciabra:', error);
-    res.status(500).json({ error: 'Erro ao processar webhook' });
+    console.error(`═══════════════════════════════════════════════════════════`);
+    console.error(`❌ [WEBHOOK] ERRO ao processar webhook - ${timestamp}`);
+    console.error(`❌ [WEBHOOK] Erro:`, error);
+    console.error(`❌ [WEBHOOK] Stack trace:`, error.stack);
+    console.error(`❌ [WEBHOOK] Payload que causou o erro:`, JSON.stringify(req.body, null, 2));
+    console.error(`═══════════════════════════════════════════════════════════`);
+    res.status(500).json({ error: 'Erro ao processar webhook', message: error.message });
   }
 });
 
@@ -345,58 +496,113 @@ router.post('/charges', authenticateToken, async (req, res) => {
       }
     }
 
-    // Se já tem charge_id, retornar dados existentes
+    // Se já tem charge_id, buscar dados atualizados da invoice
     if (payment.ciabra_charge_id) {
-      const chargeData = await getChargeStatus(payment.ciabra_charge_id);
-      return res.json({
-        charge: chargeData,
-        payment: {
-          id: payment.id,
-          ciabra_charge_id: payment.ciabra_charge_id,
-          pix_qr_code: payment.ciabra_pix_qr_code,
-          pix_qr_code_url: payment.ciabra_pix_qr_code_url,
-          boleto_url: payment.ciabra_boleto_url,
-        },
-      });
+      console.log(`📥 [ciabra/charges] Buscando dados atualizados da invoice: ${payment.ciabra_charge_id}`);
+      try {
+        const chargeData = await getChargeStatus(payment.ciabra_charge_id);
+        console.log(`✅ [ciabra/charges] Dados da invoice recebidos:`, JSON.stringify(chargeData, null, 2));
+        
+        // Buscar dados completos do PIX/Boleto usando o endpoint de installments
+        const installments = chargeData.installments || [];
+        const firstInstallment = installments[0];
+        const installmentId = firstInstallment?.id;
+        
+        let pixQrCode = payment.ciabra_pix_qr_code;
+        let pixQrCodeUrl = payment.ciabra_pix_qr_code_url;
+        let boletoUrl = payment.ciabra_boleto_url;
+        let paymentUrl = payment.ciabra_payment_url || chargeData.url;
+        
+        // Se temos o installmentId, buscar dados atualizados do PIX/Boleto
+        if (installmentId) {
+          try {
+            const { getInstallmentPayments } = await import('../services/ciabra.js');
+            const installmentData = await getInstallmentPayments(installmentId);
+            console.log(`✅ [ciabra/charges] Dados do installment recebidos:`, JSON.stringify(installmentData, null, 2));
+            
+            // Atualizar dados do PIX
+            if (installmentData.pix) {
+              pixQrCode = installmentData.pix.emv || installmentData.pix.qrCode || installmentData.pix.code || pixQrCode;
+              pixQrCodeUrl = installmentData.pix.location || installmentData.pix.qrCodeUrl || installmentData.pix.url || pixQrCodeUrl;
+            }
+            
+            // Atualizar dados do Boleto
+            if (installmentData.boleto) {
+              boletoUrl = installmentData.boleto.url || installmentData.boleto.link || boletoUrl;
+            }
+            
+            // Atualizar no banco se os dados mudaram
+            if (pixQrCode !== payment.ciabra_pix_qr_code || 
+                pixQrCodeUrl !== payment.ciabra_pix_qr_code_url || 
+                boletoUrl !== payment.ciabra_boleto_url ||
+                paymentUrl !== payment.ciabra_payment_url) {
+              await pool.query(
+                `UPDATE payments 
+                 SET ciabra_pix_qr_code = $1,
+                     ciabra_pix_qr_code_url = $2,
+                     ciabra_boleto_url = $3,
+                     ciabra_payment_url = $4,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $5`,
+                [pixQrCode, pixQrCodeUrl, boletoUrl, paymentUrl, payment.id]
+              );
+              console.log(`✅ [ciabra/charges] Dados do PIX/Boleto atualizados no banco`);
+            }
+          } catch (installmentError) {
+            console.warn('⚠️ [ciabra/charges] Não foi possível buscar dados do installment:', installmentError.message);
+            // Continuar com os dados que já temos no banco
+          }
+        }
+        
+        return res.json({
+          charge: chargeData,
+          payment: {
+            id: payment.id,
+            amount: payment.amount,
+            due_date: payment.due_date,
+            status: payment.status,
+            ciabra_charge_id: payment.ciabra_charge_id,
+            ciabra_pix_qr_code: pixQrCode,
+            ciabra_pix_qr_code_url: pixQrCodeUrl,
+            ciabra_boleto_url: boletoUrl,
+            payment_url: paymentUrl,
+            installment_id: installmentId,
+          },
+        });
+      } catch (error) {
+        console.error('❌ [ciabra/charges] Erro ao buscar dados da invoice:', error);
+        // Se der erro ao buscar, retornar os dados que temos no banco
+        return res.json({
+          charge: null,
+          payment: {
+            id: payment.id,
+            ciabra_charge_id: payment.ciabra_charge_id,
+            ciabra_pix_qr_code: payment.ciabra_pix_qr_code,
+            ciabra_pix_qr_code_url: payment.ciabra_pix_qr_code_url,
+            boleto_url: payment.ciabra_boleto_url,
+            payment_url: payment.ciabra_payment_url,
+          },
+          error: 'Não foi possível buscar dados atualizados da invoice',
+        });
+      }
     }
 
     // Criar cobrança no Ciabra
     // Formatar data de forma simples para a descrição
     const dueDateFormatted = new Date(payment.due_date).toLocaleDateString('pt-BR');
     
-    // IMPORTANTE: Salvar o ciabra_customer_id ANTES de criar a invoice
+    // IMPORTANTE: Buscar o ciabra_customer_id mais recente do banco ANTES de criar a invoice
     // Isso evita criar múltiplos clientes
-    let customerIdToUse = payment.ciabraCustomerId;
+    const userCheckResult = await pool.query(
+      `SELECT ciabra_customer_id FROM users WHERE id = $1`,
+      [userId]
+    );
+    const customerIdFromDb = userCheckResult.rows[0]?.ciabra_customer_id || payment.ciabraCustomerId || null;
     
-    // Se não temos o ciabra_customer_id, criar o cliente primeiro e salvar
-    if (!customerIdToUse) {
-      const { createOrGetCustomer } = await import('../services/ciabra.js');
-      const customer = await createOrGetCustomer({
-        name: payment.name,
-        email: payment.email,
-        document: payment.cpf,
-        phone: payment.phone,
-        ciabraCustomerId: null, // Não temos ainda
-        address: payment.address,
-        city: payment.city,
-        state: payment.state,
-        zipCode: payment.zip_code,
-      });
-      
-      customerIdToUse = customer.id;
-      
-      // Salvar imediatamente no banco
-      if (customerIdToUse && userId) {
-        await pool.query(
-          `UPDATE users 
-           SET ciabra_customer_id = $1
-           WHERE id = $2 AND (ciabra_customer_id IS NULL OR ciabra_customer_id != $1)`,
-          [customerIdToUse, userId]
-        );
-        console.log(`✅ Salvo ciabra_customer_id ${customerIdToUse} para usuário ${userId} (antes de criar invoice)`);
-      }
-    }
+    console.log(`🔍 [ciabra/charges] ciabra_customer_id do banco: ${customerIdFromDb || 'não encontrado'}`);
     
+    // Passar o ciabra_customer_id para o createCharge, que vai criar o cliente se necessário
+    // e retornar o customerId na resposta para salvarmos no banco
     const chargeData = await createCharge({
       amount: parseFloat(payment.amount),
       due_date: payment.due_date,
@@ -406,7 +612,7 @@ router.post('/charges', authenticateToken, async (req, res) => {
         email: payment.email,
         document: payment.cpf,
         phone: payment.phone,
-        ciabraCustomerId: customerIdToUse, // Usar o ID que acabamos de obter/salvar
+        ciabraCustomerId: customerIdFromDb, // Passar o ID do banco para reutilizar
         address: payment.address,
         city: payment.city,
         state: payment.state,
@@ -414,176 +620,89 @@ router.post('/charges', authenticateToken, async (req, res) => {
       },
       payment_method,
       externalId: payment.id.toString(), // ID do nosso pagamento
-      userId: userId, // Para salvar o ciabra_customer_id após criar (fallback)
+      userId: userId, // Para salvar o ciabra_customer_id após criar
     });
-
-    // Buscar dados completos do PIX/Boleto usando o endpoint de installments
-    let pixQrCode = null;
-    let pixQrCodeUrl = null;
-    let boletoUrl = null;
-    let paymentUrl = null; // URL para redirecionar ou mostrar no modal
+    
+    // IMPORTANTE: Salvar o ciabra_customer_id no banco APÓS criar a invoice
+    // Isso garante que sempre temos o ID salvo, mesmo se o cliente foi criado agora
+    if (chargeData.customerId && userId) {
+      await pool.query(
+        `UPDATE users 
+         SET ciabra_customer_id = $1
+         WHERE id = $2 AND (ciabra_customer_id IS NULL OR ciabra_customer_id != $1)`,
+        [chargeData.customerId, userId]
+      );
+      console.log(`✅ Salvo ciabra_customer_id ${chargeData.customerId} para usuário ${userId} (após criar invoice)`);
+    }
 
     console.log('📋 [ciabra/charges] Resposta da invoice criada:', JSON.stringify(chargeData, null, 2));
     
     // Verificar se é uma resposta parcial (erro 500 mas invoice pode ter sido criada)
     if (chargeData._partial) {
-      console.warn('⚠️ [ciabra/charges] Resposta parcial recebida. Invoice pode ter sido criada no Ciabra, mas dados não estão disponíveis ainda.');
-      console.warn(`⚠️ [ciabra/charges] Mensagem: ${chargeData._error || 'Aguarde o webhook ou verifique no painel do Ciabra'}`);
+      console.warn('⚠️ [ciabra/charges] Resposta parcial recebida. Invoice pode ter sido criada no Ciabra.');
+      console.warn(`⚠️ [ciabra/charges] O webhook vai atualizar os dados quando a invoice for processada.`);
       
-      // Salvar customerId no usuário se disponível
-      if (chargeData.customerId && userId) {
-        try {
-          await pool.query(
-            `UPDATE users 
-             SET ciabra_customer_id = $1
-             WHERE id = $2 AND ciabra_customer_id IS NULL`,
-            [chargeData.customerId, userId]
-          );
-          console.log(`✅ Salvo ciabra_customer_id ${chargeData.customerId} para usuário ${userId}`);
-        } catch (error) {
-          console.error('❌ Erro ao salvar ciabra_customer_id:', error);
-        }
-      }
-      
-      // Retornar resposta parcial para o frontend
+      // Retornar resposta indicando que a cobrança foi gerada
+      // O webhook vai atualizar os dados depois
       res.json({
-        message: 'Cobrança pode ter sido criada, mas dados não estão disponíveis ainda',
-        warning: chargeData._error || 'A invoice pode ter sido criada no Ciabra. Aguarde o webhook ou verifique no painel.',
+        message: 'Cobrança gerada com sucesso',
+        info: 'A cobrança foi gerada no Ciabra. Os dados do PIX/Boleto serão atualizados automaticamente via webhook. Você pode clicar em "Gerar QR Code" para buscar os dados atualizados.',
         charge: chargeData,
         payment: {
           id: payment.id,
           amount: payment.amount,
           due_date: payment.due_date,
           status: payment.status,
-          ciabra_charge_id: null,
+          ciabra_charge_id: null, // Será atualizado pelo webhook
           ciabra_pix_qr_code: null,
           ciabra_pix_qr_code_url: null,
           ciabra_boleto_url: null,
           payment_url: null,
           installment_id: null,
         },
-        partial: true,
+        pending: true, // Flag indicando que os dados ainda não estão disponíveis
       });
       return;
     }
     
-    // Pegar o installmentId da resposta da invoice criada
-    const installments = chargeData.installments || [];
-    console.log(`📋 [ciabra/charges] Installments encontrados: ${installments.length}`);
-    console.log(`📋 [ciabra/charges] Installments:`, JSON.stringify(installments, null, 2));
-    
-    const firstInstallment = installments[0];
-    const installmentId = firstInstallment?.id;
-    console.log(`📋 [ciabra/charges] InstallmentId extraído: ${installmentId || 'não encontrado'}`);
-
-    if (installmentId) {
-      try {
-        console.log(`📥 Buscando dados do installment: ${installmentId}`);
-        // Aguardar um pouco para o Ciabra processar o pagamento
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Buscar dados completos do installment (PIX/Boleto)
-        const installmentData = await getInstallmentPayments(installmentId);
-        console.log(`✅ Dados do installment recebidos:`, JSON.stringify(installmentData, null, 2));
-
-        // Extrair dados do PIX
-        if (installmentData.pix) {
-          pixQrCode = installmentData.pix.emv || installmentData.pix.qrCode || installmentData.pix.code;
-          pixQrCodeUrl = installmentData.pix.location || installmentData.pix.qrCodeUrl || installmentData.pix.url;
-          console.log(`✅ PIX encontrado - EMV: ${pixQrCode ? pixQrCode.substring(0, 50) + '...' : 'não encontrado'}`);
-        }
-
-        // Extrair dados do Boleto
-        if (installmentData.boleto) {
-          boletoUrl = installmentData.boleto.url || installmentData.boleto.link;
-          console.log(`✅ Boleto encontrado - URL: ${boletoUrl || 'não encontrado'}`);
-        }
-
-        // Pegar URL de pagamento da invoice (se disponível)
-        if (chargeData.url) {
-          paymentUrl = chargeData.url;
-          console.log(`✅ URL de pagamento: ${paymentUrl}`);
-        }
-      } catch (error) {
-        console.warn('⚠️ Não foi possível buscar dados do installment, tentando invoice:', error);
-        // Fallback: tentar buscar da invoice diretamente
-        try {
-          const invoiceDetails = await getChargeStatus(chargeData.id);
-          if (invoiceDetails.url) {
-            paymentUrl = invoiceDetails.url;
-          }
-        } catch (fallbackError) {
-          console.warn('⚠️ Não foi possível buscar detalhes da invoice:', fallbackError);
-        }
-      }
-    } else {
-      console.warn('⚠️ InstallmentId não encontrado na resposta da invoice');
-      // Fallback: usar URL da invoice se disponível
-      if (chargeData.url) {
-        paymentUrl = chargeData.url;
-        console.log(`✅ URL de pagamento (fallback): ${paymentUrl}`);
-      }
-    }
-
-    // Garantir que sempre temos pelo menos a URL de pagamento se disponível
-    if (!paymentUrl && chargeData.url) {
-      paymentUrl = chargeData.url;
-      console.log(`✅ URL de pagamento (garantia final): ${paymentUrl}`);
-    }
-
-    // Atualizar pagamento com dados do Ciabra
-    const updateData = {
-      ciabra_charge_id: chargeData.id,
-      ciabra_pix_qr_code: pixQrCode,
-      ciabra_pix_qr_code_url: pixQrCodeUrl,
-      ciabra_boleto_url: boletoUrl,
-    };
-
-    await pool.query(
-      `UPDATE payments 
-       SET ciabra_charge_id = $1,
-           ciabra_pix_qr_code = $2,
-           ciabra_pix_qr_code_url = $3,
-           ciabra_boleto_url = $4,
-           ciabra_payment_url = $5,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6`,
-      [
-        updateData.ciabra_charge_id,
-        updateData.ciabra_pix_qr_code,
-        updateData.ciabra_pix_qr_code_url,
-        updateData.ciabra_boleto_url,
-        paymentUrl,
-        payment.id,
-      ]
-    );
-
-    // Salvar ciabra_customer_id no usuário (se ainda não tiver e se tiver customerId na resposta)
-    if (chargeData.customerId && userId) {
+    // Se temos o ID da invoice, salvar imediatamente
+    // Os dados do PIX/Boleto serão buscados quando o usuário clicar em "Gerar QR Code"
+    // ou atualizados pelo webhook
+    if (chargeData.id) {
       await pool.query(
-        `UPDATE users 
-         SET ciabra_customer_id = $1
-         WHERE id = $2 AND ciabra_customer_id IS NULL`,
-        [chargeData.customerId, userId]
+        `UPDATE payments 
+         SET ciabra_charge_id = $1,
+             ciabra_payment_url = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [
+          chargeData.id,
+          chargeData.url || null,
+          payment.id,
+        ]
       );
-      console.log(`✅ Salvo ciabra_customer_id ${chargeData.customerId} para usuário ${userId}`);
+      console.log(`✅ Salvo ciabra_charge_id ${chargeData.id} para pagamento ${payment.id}`);
     }
 
+    // Retornar resposta indicando que a cobrança foi gerada
+    // Os dados do PIX/Boleto serão buscados quando necessário ou atualizados pelo webhook
     res.json({
-      message: 'Cobrança criada com sucesso',
+      message: 'Cobrança gerada com sucesso',
+      info: 'A cobrança foi gerada no Ciabra. Clique em "Gerar QR Code" para obter os dados do PIX/Boleto, ou aguarde o webhook atualizar automaticamente.',
       charge: chargeData,
       payment: {
         id: payment.id,
         amount: payment.amount,
         due_date: payment.due_date,
         status: payment.status,
-        ciabra_charge_id: updateData.ciabra_charge_id,
-        ciabra_pix_qr_code: updateData.ciabra_pix_qr_code,
-        ciabra_pix_qr_code_url: updateData.ciabra_pix_qr_code_url,
-        ciabra_boleto_url: updateData.ciabra_boleto_url,
-        payment_url: paymentUrl, // URL para redirecionar ou mostrar no modal
-        installment_id: installmentId, // ID do installment para consultas futuras
+        ciabra_charge_id: chargeData.id,
+        ciabra_pix_qr_code: null, // Será buscado quando necessário
+        ciabra_pix_qr_code_url: null,
+        ciabra_boleto_url: null,
+        payment_url: chargeData.url || null,
+        installment_id: chargeData.installments?.[0]?.id || null,
       },
+      pending: !chargeData.installments || chargeData.installments.length === 0, // Flag indicando se precisa buscar dados
     });
   } catch (error) {
     console.error('Erro ao criar cobrança:', error);
@@ -631,6 +750,118 @@ router.get('/charges/:charge_id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Erro ao consultar cobrança:', error);
     res.status(500).json({ error: error.message || 'Erro ao consultar cobrança' });
+  }
+});
+
+/**
+ * Buscar dados atualizados do PIX/Boleto de uma cobrança
+ * GET /api/ciabra/charges/:payment_id/payment-data
+ * Busca os dados atualizados do PIX/Boleto usando o ciabra_charge_id salvo no banco
+ */
+router.get('/charges/:payment_id/payment-data', authenticateToken, async (req, res) => {
+  try {
+    const { payment_id } = req.params;
+    const userId = req.user.id;
+
+    console.log(`📥 [ciabra/payment-data] Buscando dados de pagamento para payment_id: ${payment_id}`);
+
+    // Buscar o pagamento e verificar se tem ciabra_charge_id
+    const paymentResult = await pool.query(
+      `SELECT p.*, u.ciabra_customer_id
+       FROM payments p
+       JOIN users u ON p.user_id = u.id
+       WHERE p.id = $1 AND p.user_id = $2`,
+      [payment_id, userId]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pagamento não encontrado' });
+    }
+
+    const payment = paymentResult.rows[0];
+
+    if (!payment.ciabra_charge_id) {
+      return res.status(400).json({ 
+        error: 'Cobrança ainda não foi criada no Ciabra. Gere a cobrança primeiro.' 
+      });
+    }
+
+    console.log(`📥 [ciabra/payment-data] Buscando dados da invoice: ${payment.ciabra_charge_id}`);
+
+    // Buscar dados atualizados da invoice
+    const { getInvoiceDetails, getInstallmentPayments } = await import('../services/ciabra.js');
+    const chargeData = await getInvoiceDetails(payment.ciabra_charge_id);
+    
+    console.log(`✅ [ciabra/payment-data] Dados da invoice recebidos:`, JSON.stringify(chargeData, null, 2));
+
+    // Buscar dados completos do PIX/Boleto usando o endpoint de installments
+    const installments = chargeData.installments || [];
+    const firstInstallment = installments[0];
+    const installmentId = firstInstallment?.id;
+
+    let pixQrCode = payment.ciabra_pix_qr_code;
+    let pixQrCodeUrl = payment.ciabra_pix_qr_code_url;
+    let boletoUrl = payment.ciabra_boleto_url;
+    let paymentUrl = payment.ciabra_payment_url || chargeData.url;
+
+    if (installmentId) {
+      try {
+        console.log(`📥 [ciabra/payment-data] Buscando dados do installment: ${installmentId}`);
+        const installmentData = await getInstallmentPayments(installmentId);
+        console.log(`✅ [ciabra/payment-data] Dados do installment recebidos:`, JSON.stringify(installmentData, null, 2));
+
+        // Extrair dados do PIX
+        if (installmentData.pix) {
+          pixQrCode = installmentData.pix.emv || installmentData.pix.qrCode || installmentData.pix.code;
+          pixQrCodeUrl = installmentData.pix.location || installmentData.pix.qrCodeUrl || installmentData.pix.url;
+          console.log(`✅ [ciabra/payment-data] PIX encontrado - EMV: ${pixQrCode ? pixQrCode.substring(0, 50) + '...' : 'não encontrado'}`);
+        }
+
+        // Extrair dados do Boleto
+        if (installmentData.boleto) {
+          boletoUrl = installmentData.boleto.url || installmentData.boleto.link;
+          console.log(`✅ [ciabra/payment-data] Boleto encontrado - URL: ${boletoUrl || 'não encontrado'}`);
+        }
+
+        // Atualizar no banco
+        await pool.query(
+          `UPDATE payments 
+           SET ciabra_pix_qr_code = $1,
+               ciabra_pix_qr_code_url = $2,
+               ciabra_boleto_url = $3,
+               ciabra_payment_url = $4,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $5`,
+          [pixQrCode, pixQrCodeUrl, boletoUrl, paymentUrl, payment.id]
+        );
+        console.log(`✅ [ciabra/payment-data] Dados do PIX/Boleto atualizados no banco`);
+      } catch (error) {
+        console.warn('⚠️ [ciabra/payment-data] Não foi possível buscar dados do installment:', error.message);
+        // Continuar com os dados que já temos no banco
+      }
+    } else {
+      console.warn('⚠️ [ciabra/payment-data] InstallmentId não encontrado na resposta da invoice');
+    }
+
+    // Retornar dados atualizados
+    res.json({
+      message: 'Dados de pagamento atualizados',
+      payment: {
+        id: payment.id,
+        amount: payment.amount,
+        due_date: payment.due_date,
+        status: payment.status,
+        ciabra_charge_id: payment.ciabra_charge_id,
+        ciabra_pix_qr_code: pixQrCode,
+        ciabra_pix_qr_code_url: pixQrCodeUrl,
+        ciabra_boleto_url: boletoUrl,
+        payment_url: paymentUrl,
+        installment_id: installmentId,
+      },
+    });
+  } catch (error) {
+    console.error('❌ [ciabra/payment-data] Erro ao buscar dados de pagamento:', error);
+    res.status(500).json({ error: error.message || 'Erro ao buscar dados de pagamento' });
   }
 });
 

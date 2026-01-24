@@ -65,11 +65,25 @@ export async function createOrGetCustomer(customerData) {
     console.log('🔵 [createOrGetCustomer] Iniciando criação/busca de cliente');
     console.log('🔵 [createOrGetCustomer] Dados recebidos:', JSON.stringify(customerData, null, 2));
     
-    // Se já temos o ID do cliente no Ciabra, retornar direto (sem fazer chamada)
+    // Se já temos o ID do cliente no Ciabra, verificar se existe antes de retornar
     if (customerData.ciabraCustomerId) {
       console.log(`✅ [createOrGetCustomer] Cliente já existe no Ciabra: ${customerData.ciabraCustomerId}`);
-      console.log(`✅ [createOrGetCustomer] Retornando cliente existente sem chamada à API`);
-      return { id: customerData.ciabraCustomerId };
+      console.log(`✅ [createOrGetCustomer] Verificando se cliente existe na API...`);
+      
+      try {
+        // Tentar buscar o cliente para verificar se existe
+        const existingCustomer = await getCustomerById(customerData.ciabraCustomerId);
+        if (existingCustomer) {
+          console.log(`✅ [createOrGetCustomer] Cliente encontrado, retornando dados completos`);
+          return existingCustomer;
+        } else {
+          console.warn(`⚠️ [createOrGetCustomer] Cliente não encontrado na API, criando novo cliente`);
+          // Cliente não existe mais, continuar para criar um novo
+        }
+      } catch (error) {
+        console.warn(`⚠️ [createOrGetCustomer] Erro ao verificar cliente existente, criando novo:`, error.message);
+        // Se der erro ao buscar, continuar para criar um novo
+      }
     }
 
     console.log('🔵 [createOrGetCustomer] Cliente não existe ainda, criando novo cliente');
@@ -160,6 +174,55 @@ export async function createOrGetCustomer(customerData) {
   } catch (error) {
     console.error('❌ [createOrGetCustomer] Erro ao criar/buscar cliente:', error);
     console.error('❌ [createOrGetCustomer] Stack trace:', error.stack);
+    throw error;
+  }
+}
+
+/**
+ * Busca um cliente no Ciabra por ID
+ * GET /invoices/applications/customers/:id
+ * @param {string} customerId - ID do cliente no Ciabra
+ * @returns {Promise<Object>} Dados do cliente
+ */
+export async function getCustomerById(customerId) {
+  try {
+    console.log('🔍 [getCustomerById] Buscando cliente no Ciabra');
+    console.log(`🔍 [getCustomerById] Customer ID: ${customerId}`);
+    
+    const authToken = getAuthToken();
+    console.log('🔍 [getCustomerById] Token de autenticação obtido');
+
+    const url = `${CIABRA_API_URL}/invoices/applications/customers/${customerId}`;
+    console.log(`🔍 [getCustomerById] URL: ${url}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': authToken,
+        'Accept': 'application/json',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    console.log(`🔍 [getCustomerById] Resposta recebida - Status: ${response.status} ${response.statusText}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.warn(`⚠️ [getCustomerById] Cliente não encontrado: ${customerId}`);
+        return null;
+      }
+      const error = await response.text();
+      console.error(`❌ [getCustomerById] Erro ao buscar cliente: ${error}`);
+      console.error(`❌ [getCustomerById] Status HTTP: ${response.status}`);
+      throw new Error(`Erro ao buscar cliente: ${error}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ [getCustomerById] Cliente encontrado:', JSON.stringify(data, null, 2));
+    return data;
+  } catch (error) {
+    console.error('❌ [getCustomerById] Erro ao buscar cliente:', error);
+    console.error('❌ [getCustomerById] Stack trace:', error.stack);
     throw error;
   }
 }
@@ -471,7 +534,9 @@ export async function getInvoiceDetails(invoiceId) {
     const response = await fetch(url, {
       method: 'GET',
       headers: {
+        'Content-Type': 'application/json',
         'Authorization': authToken,
+        'Accept': 'application/json',
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -686,12 +751,18 @@ export async function createCharge(chargeData) {
       // Se for erro 500, a invoice pode ter sido criada mesmo assim
       if (invoiceError.is500Error || invoiceError.statusCode === 500 || (invoiceError.message && invoiceError.message.includes('500'))) {
         console.warn('⚠️ [createCharge] Erro 500 ao criar invoice, mas invoice pode ter sido criada no Ciabra');
-        console.warn('⚠️ [createCharge] Aguardando 5 segundos e tentando construir resposta parcial...');
+        console.warn('⚠️ [createCharge] Aguardando 5 segundos e tentando recuperar invoice criada...');
         await new Promise(resolve => setTimeout(resolve, 5000));
         
-        // Construir resposta parcial com dados que temos
-        // A invoice pode ter sido criada, mas não temos o ID ainda
-        // Vamos retornar um objeto que indica que houve erro mas a invoice pode ter sido criada
+        // Tentar buscar a invoice criada usando o externalId
+        // Como não temos um endpoint direto para buscar por externalId, vamos tentar buscar
+        // a invoice mais recente do cliente ou aguardar o webhook
+        console.log(`🔍 [createCharge] Tentando recuperar invoice com externalId: ${invoiceData.externalId}`);
+        console.log(`🔍 [createCharge] Customer ID: ${customer.id}`);
+        
+        // Por enquanto, vamos retornar uma resposta parcial indicando que a invoice pode ter sido criada
+        // O webhook vai atualizar os dados quando a invoice for processada
+        // TODO: Implementar busca de invoice por externalId se a API do Ciabra fornecer esse endpoint
         invoice = {
           id: null, // Não temos o ID ainda
           customerId: customer.id,
@@ -705,6 +776,7 @@ export async function createCharge(chargeData) {
           _error: 'Invoice pode ter sido criada no Ciabra, mas não foi possível recuperar os dados. Aguarde o webhook ou verifique no painel.',
         };
         console.warn('⚠️ [createCharge] Retornando resposta parcial:', JSON.stringify(invoice, null, 2));
+        console.warn('⚠️ [createCharge] O webhook do Ciabra vai atualizar os dados quando a invoice for processada');
       } else {
         // Para outros erros, lançar normalmente
         throw invoiceError;

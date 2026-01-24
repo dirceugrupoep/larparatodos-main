@@ -117,18 +117,18 @@ const Payments = () => {
       setCreatingCharge(chargeId);
       const response = await ciabraApi.createCharge(paymentId, method);
       
-      // Verificar se é uma resposta parcial (erro 500 mas invoice pode ter sido criada)
-      if (response.partial) {
+      // Verificar se é uma resposta parcial ou pendente (dados não disponíveis ainda)
+      if (response.partial || response.pending || !response.payment?.ciabra_pix_qr_code) {
         toast({
-          title: 'Atenção',
-          description: response.warning || 'A cobrança pode ter sido criada, mas os dados não estão disponíveis ainda. Aguarde o webhook ou verifique no painel do Ciabra.',
+          title: 'Cobrança gerada!',
+          description: response.info || 'A cobrança foi gerada. Clique em "Gerar QR Code" para obter os dados do PIX/Boleto.',
           variant: 'default',
         });
         loadData();
         return;
       }
       
-      // Extrair dados da resposta
+      // Se temos os dados do PIX/Boleto, abrir o modal diretamente
       const payment = response.payment || {};
       const pixCode = payment.ciabra_pix_qr_code || '';
       const pixUrl = payment.ciabra_pix_qr_code_url || '';
@@ -142,7 +142,6 @@ const Payments = () => {
           setPaymentUrl(paymentPageUrl);
           setShowPixDialog(true);
         } else if (paymentPageUrl) {
-          // Se não tiver QR code mas tiver URL, redirecionar
           window.open(paymentPageUrl, '_blank');
           toast({
             title: 'Redirecionando...',
@@ -155,7 +154,6 @@ const Payments = () => {
           setPaymentUrl(paymentPageUrl);
           setShowBoletoDialog(true);
         } else if (paymentPageUrl) {
-          // Se não tiver URL do boleto mas tiver URL de pagamento, redirecionar
           window.open(paymentPageUrl, '_blank');
           toast({
             title: 'Redirecionando...',
@@ -174,6 +172,68 @@ const Payments = () => {
       toast({
         title: 'Erro',
         description: error instanceof Error ? error.message : 'Erro ao criar cobrança',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreatingCharge(null);
+    }
+  };
+
+  const handleGetPaymentData = async (paymentId: number, method: 'pix' | 'boleto') => {
+    try {
+      setCreatingCharge(paymentId);
+      const response = await ciabraApi.getPaymentData(paymentId);
+      
+      const payment = response.payment || {};
+      const pixCode = payment.ciabra_pix_qr_code || '';
+      const pixUrl = payment.ciabra_pix_qr_code_url || '';
+      const boleto = payment.ciabra_boleto_url || '';
+      const paymentPageUrl = payment.payment_url || '';
+      
+      if (method === 'pix') {
+        if (pixCode) {
+          setPixQrCode(pixCode);
+          setPixQrCodeUrl(pixUrl);
+          setPaymentUrl(paymentPageUrl);
+          setShowPixDialog(true);
+        } else if (paymentPageUrl) {
+          window.open(paymentPageUrl, '_blank');
+          toast({
+            title: 'Redirecionando...',
+            description: 'Abrindo página de pagamento PIX',
+          });
+        } else {
+          toast({
+            title: 'Aviso',
+            description: 'Dados do PIX ainda não estão disponíveis. Aguarde alguns instantes e tente novamente.',
+            variant: 'default',
+          });
+        }
+      } else if (method === 'boleto') {
+        if (boleto) {
+          setBoletoUrl(boleto);
+          setPaymentUrl(paymentPageUrl);
+          setShowBoletoDialog(true);
+        } else if (paymentPageUrl) {
+          window.open(paymentPageUrl, '_blank');
+          toast({
+            title: 'Redirecionando...',
+            description: 'Abrindo página de pagamento do Boleto',
+          });
+        } else {
+          toast({
+            title: 'Aviso',
+            description: 'Dados do Boleto ainda não estão disponíveis. Aguarde alguns instantes e tente novamente.',
+            variant: 'default',
+          });
+        }
+      }
+
+      loadData();
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Erro ao buscar dados de pagamento',
         variant: 'destructive',
       });
     } finally {
@@ -439,6 +499,41 @@ const Payments = () => {
                       </>
                     ) : (
                         <>
+                          {/* Se tem ciabra_charge_id mas não tem dados do PIX/Boleto, mostrar botão para gerar */}
+                          {stats.nextPayment.ciabra_charge_id && 
+                           !stats.nextPayment.ciabra_pix_qr_code && 
+                           !stats.nextPayment.ciabra_boleto_url && (
+                            <>
+                              <Button
+                                onClick={() => handleGetPaymentData(stats.nextPayment.id!, 'pix')}
+                                disabled={creatingCharge === stats.nextPayment.id}
+                              >
+                                {creatingCharge === stats.nextPayment.id ? (
+                                  'Gerando...'
+                                ) : (
+                                  <>
+                                    <QrCode className="w-4 h-4 mr-1" />
+                                    Gerar QR Code PIX
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => handleGetPaymentData(stats.nextPayment.id!, 'boleto')}
+                                disabled={creatingCharge === stats.nextPayment.id}
+                              >
+                                {creatingCharge === stats.nextPayment.id ? (
+                                  'Gerando...'
+                                ) : (
+                                  <>
+                                    <Receipt className="w-4 h-4 mr-1" />
+                                    Gerar Boleto
+                                  </>
+                                )}
+                              </Button>
+                            </>
+                          )}
+                          {/* Se tem dados do PIX, mostrar botão Ver PIX */}
                           {(stats.nextPayment.ciabra_pix_qr_code || stats.nextPayment.ciabra_payment_url) && (
                             <Button
                               onClick={() => {
@@ -458,6 +553,7 @@ const Payments = () => {
                               Ver PIX
                             </Button>
                           )}
+                          {/* Se tem dados do Boleto, mostrar botão Ver Boleto */}
                           {stats.nextPayment.ciabra_boleto_url && (
                             <Button
                               variant="outline"
@@ -631,6 +727,44 @@ const Payments = () => {
                           </>
                         ) : (
                           <>
+                            {/* Se tem ciabra_charge_id mas não tem dados do PIX/Boleto, mostrar botão para gerar */}
+                            {payment.ciabra_charge_id && 
+                             !payment.ciabra_pix_qr_code && 
+                             !payment.ciabra_boleto_url && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleGetPaymentData(payment.id, 'pix')}
+                                  disabled={creatingCharge === payment.id}
+                                >
+                                  {creatingCharge === payment.id ? (
+                                    'Gerando...'
+                                  ) : (
+                                    <>
+                                      <QrCode className="w-4 h-4 mr-1" />
+                                      Gerar PIX
+                                    </>
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleGetPaymentData(payment.id, 'boleto')}
+                                  disabled={creatingCharge === payment.id}
+                                >
+                                  {creatingCharge === payment.id ? (
+                                    'Gerando...'
+                                  ) : (
+                                    <>
+                                      <Receipt className="w-4 h-4 mr-1" />
+                                      Gerar Boleto
+                                    </>
+                                  )}
+                                </Button>
+                              </>
+                            )}
+                            {/* Se tem dados do PIX, mostrar botão Ver PIX */}
                             {(payment.ciabra_pix_qr_code || payment.ciabra_payment_url || payment.ciabra_pix_qr_code_url) && (
                               <Button
                                 variant="outline"
@@ -652,6 +786,7 @@ const Payments = () => {
                                 Ver PIX
                               </Button>
                             )}
+                            {/* Se tem dados do Boleto, mostrar botão Ver Boleto */}
                             {payment.ciabra_boleto_url && (
                               <Button
                                 variant="outline"
