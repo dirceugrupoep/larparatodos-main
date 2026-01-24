@@ -87,20 +87,27 @@ export async function createOrGetCustomer(customerData) {
     const defaultState = 'SP';
 
     const cleanZip = (customerData.zipCode || defaultZip).replace(/\D/g, '');
-    const addressLine = customerData.address || `${defaultStreet} - ${defaultNeighborhood}`;
+    const rawAddress = customerData.address || defaultStreet;
+    const neighborhood = defaultNeighborhood;
+    const city = customerData.city || defaultCity;
+    const state = customerData.state || defaultState;
+
+    // Montar objeto address no formato esperado pela API do Ciabra
+    const address = {
+      street: rawAddress,
+      number: rawAddress.match(/\d+/)?.[0] || 'SN',
+      neighborhood,
+      city,
+      state,
+      zipCode: cleanZip,
+    };
 
     const payload = {
       fullName: customerData.name,
       document: customerData.document?.replace(/\D/g, ''), // Remove formatação
       email: customerData.email || undefined,
       phone: customerData.phone ? `+55${customerData.phone.replace(/\D/g, '')}` : undefined,
-      // Campos de endereço - a API do Ciabra pode ignorar chaves extras,
-      // mas se aceitar, isso garante que boletos tenham endereço do pagador.
-      address: addressLine,
-      city: customerData.city || defaultCity,
-      state: customerData.state || defaultState,
-      zipCode: cleanZip,
-      neighborhood: defaultNeighborhood,
+      address,
     };
 
     // Remover campos undefined/null
