@@ -7,21 +7,12 @@ const CIABRA_CLIENT_ID = process.env.CIABRA_CLIENT_ID;
 const CIABRA_CLIENT_SECRET = process.env.CIABRA_CLIENT_SECRET;
 
 /**
- * Gera o token de autenticação Basic (Base64)
- * Formato: Basic {base64(public:private)}
+ * Token de autenticação Basic fixo (fornecido pelo usuário)
+ * IMPORTANTE: Hoje estamos usando o token já gerado manualmente (como no Insomnia).
+ * No futuro, podemos voltar a gerar via CIABRA_CLIENT_ID/CIABRA_CLIENT_SECRET.
  */
 function getAuthToken() {
-  if (!CIABRA_CLIENT_ID || !CIABRA_CLIENT_SECRET) {
-    throw new Error('Credenciais do Ciabra não configuradas');
-  }
-
-  // Combinar chave pública e privada no formato public:private
-  const credentials = `${CIABRA_CLIENT_ID}:${CIABRA_CLIENT_SECRET}`;
-  
-  // Codificar em Base64
-  const token = Buffer.from(credentials).toString('base64');
-  
-  return `Basic ${token}`;
+  return 'Basic NTA3ZDE2YWY2MzE0M2ExNzAzMzI4ZTEyMTExZjVhOGRkMTY3OTkyZGQyYWQyNTQyMWRjNzozYTkxMDVlZDc4NWM5N2E2YWMwZg==';
 }
 
 /**
