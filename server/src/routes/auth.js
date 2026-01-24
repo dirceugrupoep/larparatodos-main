@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../database/connection.js';
 import { z } from 'zod';
+import { createOrGetCustomer } from '../services/ciabra.js';
 
 const router = express.Router();
 
@@ -20,6 +21,10 @@ const registerSchema = z.object({
     .min(6, 'Senha deve ter pelo menos 6 caracteres')
     .max(100, 'Senha muito longa'),
   phone: z.string().max(20).optional(),
+  cpf: z.string()
+    .min(11, 'CPF inválido')
+    .max(14, 'CPF inválido')
+    .optional(),
   association_id: z.number().int().positive().optional(),
   // Agora permitimos qualquer dia entre 1 e 31
   payment_day: z.number().int().refine(
@@ -39,7 +44,7 @@ const loginSchema = z.object({
 router.post('/register', async (req, res) => {
   try {
     const validatedData = registerSchema.parse(req.body);
-    const { name, email, password, phone, association_id, payment_day } = validatedData;
+    const { name, email, password, phone, cpf, association_id, payment_day } = validatedData;
 
     // Check if user exists
     const existingUser = await pool.query(
@@ -83,6 +88,44 @@ router.post('/register', async (req, res) => {
     );
 
     const user = result.rows[0];
+
+    // Criar perfil com CPF se fornecido
+    if (cpf) {
+      await pool.query(
+        'INSERT INTO user_profiles (user_id, cpf) VALUES ($1, $2)',
+        [user.id, cpf.replace(/\D/g, '')] // Remove formatação do CPF
+      );
+
+      // Criar cliente no Ciabra (assíncrono - não bloqueia o cadastro se falhar)
+      (async () => {
+        try {
+          console.log(`🔄 [auth/register] Criando cliente no Ciabra para usuário ${user.id}...`);
+          const ciabraCustomer = await createOrGetCustomer({
+            name: name,
+            email: email,
+            document: cpf.replace(/\D/g, ''), // Remove formatação do CPF
+            phone: phone ? (phone.startsWith('+') ? phone : `+55${phone.replace(/\D/g, '')}`) : null,
+            ciabraCustomerId: null, // Novo cliente
+            address: null,
+            city: null,
+            state: null,
+            zipCode: null,
+          });
+          
+          if (ciabraCustomer && ciabraCustomer.id) {
+            // Salvar ciabra_customer_id no banco
+            await pool.query(
+              'UPDATE users SET ciabra_customer_id = $1 WHERE id = $2',
+              [ciabraCustomer.id, user.id]
+            );
+            console.log(`✅ [auth/register] Cliente Ciabra criado e salvo: ${ciabraCustomer.id} para usuário ${user.id}`);
+          }
+        } catch (error) {
+          // Não bloqueia o cadastro se falhar ao criar no Ciabra
+          console.error(`⚠️ [auth/register] Erro ao criar cliente no Ciabra (não bloqueia cadastro):`, error.message);
+        }
+      })();
+    }
 
     // Verificar se JWT_SECRET está configurado
     const jwtSecret = process.env.JWT_SECRET;

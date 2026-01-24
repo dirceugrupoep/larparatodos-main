@@ -55,13 +55,14 @@ export const authApi = {
     email: string,
     password: string,
     phone?: string,
+    cpf?: string,
     association_id?: number,
     payment_day?: number
   ): Promise<RegisterResponse> {
     const response = await fetch(`${API_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, phone, association_id, payment_day }),
+      body: JSON.stringify({ name, email, password, phone, cpf, association_id, payment_day }),
     });
 
     if (!response.ok) {

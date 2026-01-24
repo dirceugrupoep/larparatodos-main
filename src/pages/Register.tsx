@@ -32,6 +32,7 @@ const Register = () => {
     password: '',
     confirmPassword: '',
     phone: '',
+    cpf: '',
     association_id: undefined as number | undefined,
     // Guardamos o dia do mês escolhido (1-31)
     payment_day: today.getDate() as number,
@@ -119,12 +120,22 @@ const Register = () => {
 
     setIsLoading(true);
 
+    if (!formData.cpf || formData.cpf.replace(/\D/g, '').length < 11) {
+      toast({
+        title: 'Erro',
+        description: 'Por favor, preencha um CPF válido',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       const response = await authApi.register(
         formData.name,
         formData.email,
         formData.password,
         formData.phone || undefined,
+        formData.cpf.replace(/\D/g, ''), // Enviar apenas números
         formData.association_id,
         formData.payment_day
       );
@@ -247,6 +258,36 @@ const Register = () => {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  CPF <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <FileText className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="000.000.000-00"
+                    value={formData.cpf}
+                    onChange={(e) => {
+                      // Formatar CPF enquanto digita
+                      let value = e.target.value.replace(/\D/g, '');
+                      if (value.length <= 11) {
+                        value = value.replace(/(\d{3})(\d)/, '$1.$2');
+                        value = value.replace(/(\d{3})(\d)/, '$1.$2');
+                        value = value.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+                        setFormData({ ...formData, cpf: value });
+                      }
+                    }}
+                    maxLength={14}
+                    required
+                    className="pl-10 h-12"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  CPF é obrigatório para gerar cobranças
+                </p>
               </div>
 
               <div>

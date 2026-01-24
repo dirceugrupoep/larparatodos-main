@@ -118,7 +118,7 @@ const Payments = () => {
       const response = await ciabraApi.createCharge(paymentId, method);
       
       // Verificar se é uma resposta parcial ou pendente (dados não disponíveis ainda)
-      if (response.partial || response.pending || !response.payment?.ciabra_pix_qr_code) {
+      if (response.partial || response.pending) {
         toast({
           title: 'Cobrança gerada!',
           description: response.info || 'A cobrança foi gerada. Clique em "Gerar QR Code" para obter os dados do PIX/Boleto.',
@@ -137,35 +137,56 @@ const Payments = () => {
       
       if (method === 'pix') {
         if (pixCode) {
+          // Abrir modal do PIX automaticamente
           setPixQrCode(pixCode);
           setPixQrCodeUrl(pixUrl);
           setPaymentUrl(paymentPageUrl);
           setShowPixDialog(true);
+          toast({
+            title: 'Sucesso!',
+            description: 'Cobrança PIX criada com sucesso',
+          });
         } else if (paymentPageUrl) {
+          // Se não tem QR code mas tem URL, abrir em nova aba
           window.open(paymentPageUrl, '_blank');
           toast({
             title: 'Redirecionando...',
             description: 'Abrindo página de pagamento PIX',
           });
+        } else {
+          // Se não tem dados ainda, mostrar mensagem
+          toast({
+            title: 'Cobrança gerada!',
+            description: 'A cobrança foi gerada. Os dados do PIX serão atualizados em instantes.',
+            variant: 'default',
+          });
         }
       } else if (method === 'boleto') {
         if (boleto) {
+          // Abrir modal do Boleto automaticamente
           setBoletoUrl(boleto);
           setPaymentUrl(paymentPageUrl);
           setShowBoletoDialog(true);
+          toast({
+            title: 'Sucesso!',
+            description: 'Cobrança Boleto criada com sucesso',
+          });
         } else if (paymentPageUrl) {
+          // Se não tem URL do boleto mas tem URL de pagamento, abrir em nova aba
           window.open(paymentPageUrl, '_blank');
           toast({
             title: 'Redirecionando...',
             description: 'Abrindo página de pagamento do Boleto',
           });
+        } else {
+          // Se não tem dados ainda, mostrar mensagem
+          toast({
+            title: 'Cobrança gerada!',
+            description: 'A cobrança foi gerada. Os dados do Boleto serão atualizados em instantes.',
+            variant: 'default',
+          });
         }
       }
-
-      toast({
-        title: 'Sucesso!',
-        description: `Cobrança ${method === 'pix' ? 'PIX' : 'Boleto'} criada com sucesso`,
-      });
 
       loadData();
     } catch (error) {

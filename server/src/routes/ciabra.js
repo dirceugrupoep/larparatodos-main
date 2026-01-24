@@ -675,45 +675,132 @@ router.post('/charges', authenticateToken, async (req, res) => {
       return;
     }
     
-    // Se temos o ID da invoice, salvar imediatamente
-    // Os dados do PIX/Boleto serão buscados quando o usuário clicar em "Gerar QR Code"
-    // ou atualizados pelo webhook
-    if (chargeData.id) {
-      await pool.query(
-        `UPDATE payments 
-         SET ciabra_charge_id = $1,
-             ciabra_payment_url = $2,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $3`,
-        [
-          chargeData.id,
-          chargeData.url || null,
-          payment.id,
-        ]
-      );
-      console.log(`✅ Salvo ciabra_charge_id ${chargeData.id} para pagamento ${payment.id}`);
-    }
+    // Se temos o ID da invoice, buscar dados do PIX/Boleto imediatamente
+    if (chargeData.id && chargeData.installments && chargeData.installments.length > 0) {
+      const installmentId = chargeData.installments[0].id;
+      console.log(`📥 [ciabra/charges] Buscando dados do PIX/Boleto imediatamente após criar invoice...`);
+      console.log(`📥 [ciabra/charges] Installment ID: ${installmentId}`);
+      
+      let pixQrCode = null;
+      let pixQrCodeUrl = null;
+      let boletoUrl = null;
+      
+      try {
+        // Aguardar um pouco para o Ciabra processar o pagamento
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Buscar dados completos do installment (PIX/Boleto)
+        const { getInstallmentPayments } = await import('../services/ciabra.js');
+        const installmentData = await getInstallmentPayments(installmentId);
+        console.log(`✅ [ciabra/charges] Dados do installment recebidos:`, JSON.stringify(installmentData, null, 2));
 
-    // Retornar resposta indicando que a cobrança foi gerada
-    // Os dados do PIX/Boleto serão buscados quando necessário ou atualizados pelo webhook
-    res.json({
-      message: 'Cobrança gerada com sucesso',
-      info: 'A cobrança foi gerada no Ciabra. Clique em "Gerar QR Code" para obter os dados do PIX/Boleto, ou aguarde o webhook atualizar automaticamente.',
-      charge: chargeData,
-      payment: {
-        id: payment.id,
-        amount: payment.amount,
-        due_date: payment.due_date,
-        status: payment.status,
-        ciabra_charge_id: chargeData.id,
-        ciabra_pix_qr_code: null, // Será buscado quando necessário
-        ciabra_pix_qr_code_url: null,
-        ciabra_boleto_url: null,
-        payment_url: chargeData.url || null,
-        installment_id: chargeData.installments?.[0]?.id || null,
-      },
-      pending: !chargeData.installments || chargeData.installments.length === 0, // Flag indicando se precisa buscar dados
-    });
+        // Extrair dados do PIX
+        if (installmentData.pix) {
+          pixQrCode = installmentData.pix.emv || installmentData.pix.qrCode || installmentData.pix.code;
+          pixQrCodeUrl = installmentData.pix.location || installmentData.pix.qrCodeUrl || installmentData.pix.url;
+          console.log(`✅ [ciabra/charges] PIX encontrado - EMV: ${pixQrCode ? pixQrCode.substring(0, 50) + '...' : 'não encontrado'}`);
+        }
+
+        // Extrair dados do Boleto
+        if (installmentData.boleto) {
+          boletoUrl = installmentData.boleto.url || installmentData.boleto.link;
+          console.log(`✅ [ciabra/charges] Boleto encontrado - URL: ${boletoUrl || 'não encontrado'}`);
+        }
+
+        // Atualizar no banco
+        await pool.query(
+          `UPDATE payments 
+           SET ciabra_charge_id = $1,
+               ciabra_pix_qr_code = $2,
+               ciabra_pix_qr_code_url = $3,
+               ciabra_boleto_url = $4,
+               ciabra_payment_url = $5,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $6`,
+          [
+            chargeData.id,
+            pixQrCode,
+            pixQrCodeUrl,
+            boletoUrl,
+            chargeData.url || null,
+            payment.id,
+          ]
+        );
+        console.log(`✅ [ciabra/charges] Dados do PIX/Boleto salvos no banco`);
+      } catch (error) {
+        console.warn('⚠️ [ciabra/charges] Não foi possível buscar dados do installment imediatamente:', error.message);
+        // Continuar mesmo se não conseguir buscar agora - o webhook vai atualizar
+        // Salvar pelo menos o charge_id e payment_url
+        await pool.query(
+          `UPDATE payments 
+           SET ciabra_charge_id = $1,
+               ciabra_payment_url = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3`,
+          [
+            chargeData.id,
+            chargeData.url || null,
+            payment.id,
+          ]
+        );
+      }
+
+      // Retornar resposta com dados do PIX/Boleto (se disponíveis)
+      res.json({
+        message: 'Cobrança gerada com sucesso',
+        charge: chargeData,
+        payment: {
+          id: payment.id,
+          amount: payment.amount,
+          due_date: payment.due_date,
+          status: payment.status,
+          ciabra_charge_id: chargeData.id,
+          ciabra_pix_qr_code: pixQrCode,
+          ciabra_pix_qr_code_url: pixQrCodeUrl,
+          ciabra_boleto_url: boletoUrl,
+          payment_url: chargeData.url || null,
+          installment_id: installmentId,
+        },
+      });
+    } else {
+      // Se não temos installments, salvar apenas o charge_id
+      if (chargeData.id) {
+        await pool.query(
+          `UPDATE payments 
+           SET ciabra_charge_id = $1,
+               ciabra_payment_url = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3`,
+          [
+            chargeData.id,
+            chargeData.url || null,
+            payment.id,
+          ]
+        );
+        console.log(`✅ Salvo ciabra_charge_id ${chargeData.id} para pagamento ${payment.id}`);
+      }
+
+      // Retornar resposta indicando que a cobrança foi gerada
+      // Os dados do PIX/Boleto serão buscados quando necessário ou atualizados pelo webhook
+      res.json({
+        message: 'Cobrança gerada com sucesso',
+        info: 'A cobrança foi gerada no Ciabra. Clique em "Gerar QR Code" para obter os dados do PIX/Boleto, ou aguarde o webhook atualizar automaticamente.',
+        charge: chargeData,
+        payment: {
+          id: payment.id,
+          amount: payment.amount,
+          due_date: payment.due_date,
+          status: payment.status,
+          ciabra_charge_id: chargeData.id,
+          ciabra_pix_qr_code: null,
+          ciabra_pix_qr_code_url: null,
+          ciabra_boleto_url: null,
+          payment_url: chargeData.url || null,
+          installment_id: chargeData.installments?.[0]?.id || null,
+        },
+        pending: true,
+      });
+    }
   } catch (error) {
     console.error('Erro ao criar cobrança:', error);
     res.status(500).json({ error: error.message || 'Erro ao criar cobrança' });
