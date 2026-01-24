@@ -108,6 +108,7 @@ export const contactApi = {
     password: string;
     message?: string;
     association_id?: number;
+    payment_day?: number;
   }): Promise<ContactResponse> {
     const response = await fetch(`${API_URL}/api/contact`, {
       method: 'POST',

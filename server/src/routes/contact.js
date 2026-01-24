@@ -15,13 +15,18 @@ const contactSchema = z.object({
   password: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres').max(100),
   message: z.string().max(5000).optional(),
   association_id: z.number().int().positive().optional(),
+  // Dia do pagamento opcional (1–31). Se não vier, calculamos depois.
+  payment_day: z.number().int().refine(
+    (val) => val >= 1 && val <= 31,
+    { message: 'Dia de pagamento deve ser entre 1 e 31' }
+  ).optional(),
 });
 
 // Create contact and user (público - cria usuário automaticamente)
 router.post('/', async (req, res) => {
   try {
     const validatedData = contactSchema.parse(req.body);
-    const { name, email, phone, cpf, password, message, association_id } = validatedData;
+    const { name, email, phone, cpf, password, message, association_id, payment_day } = validatedData;
 
     // Verificar se usuário já existe
     const existingUser = await pool.query(
@@ -71,8 +76,8 @@ router.post('/', async (req, res) => {
     try {
       // Criar usuário
       const userResult = await pool.query(
-        'INSERT INTO users (name, email, password, phone, association_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, phone, created_at',
-        [name, email, hashedPassword, phone || null, finalAssociationId || null]
+        'INSERT INTO users (name, email, password, phone, association_id, payment_day) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, phone, created_at',
+        [name, email, hashedPassword, phone || null, finalAssociationId || null, payment_day || null]
       );
 
       const user = userResult.rows[0];

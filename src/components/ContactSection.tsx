@@ -25,6 +25,9 @@ export const ContactSection = () => {
   const [associations, setAssociations] = useState<Association[]>([]);
   const [isLoadingAssociations, setIsLoadingAssociations] = useState(true);
 
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -34,6 +37,9 @@ export const ContactSection = () => {
     confirmPassword: "",
     message: "",
     association_id: undefined as number | undefined,
+    // Dia escolhido (1–31) e data completa para o calendário
+    payment_day: today.getDate() as number,
+    payment_date: todayStr,
     acceptedTerms: false,
   });
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -144,6 +150,7 @@ export const ContactSection = () => {
         password: formData.password,
         message: formData.message || undefined,
         association_id: formData.association_id,
+        payment_day: formData.payment_day,
       });
 
       // Registrar aceite do termo
@@ -183,6 +190,8 @@ export const ContactSection = () => {
         confirmPassword: "",
         message: "",
         association_id: currentAssociationId,
+        payment_day: today.getDate() as number,
+        payment_date: todayStr,
         acceptedTerms: false
       });
     } catch (error) {
@@ -408,6 +417,30 @@ export const ContactSection = () => {
                           className="h-12"
                         />
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-foreground mb-1.5 block">
+                        Dia de Pagamento <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        type="date"
+                        value={formData.payment_date}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          const date = new Date(value);
+                          const day = date.getDate();
+                          setFormData({
+                            ...formData,
+                            payment_date: value,
+                            payment_day: day,
+                          });
+                        }}
+                        className="h-12"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        Escolha a data do primeiro vencimento. Usaremos o mesmo dia nos meses seguintes.
+                      </p>
                     </div>
 
                     <div className="grid sm:grid-cols-2 gap-4">

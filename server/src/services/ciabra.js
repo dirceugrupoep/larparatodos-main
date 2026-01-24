@@ -187,6 +187,14 @@ export async function createInvoice(invoiceData) {
       paymentTypes: Array.isArray(invoiceData.paymentTypes) 
         ? invoiceData.paymentTypes 
         : (invoiceData.paymentTypes ? [invoiceData.paymentTypes] : ['PIX']),
+      // IMPORTANTE: a API do Ciabra parece esperar sempre um array notifications,
+      // caso contrário dá erro interno (reading 'map'). Vamos enviar um conjunto padrão.
+      notifications: [
+        { type: 'INVOICE_GENERATED', channel: 'Email' },
+        { type: 'INVOICE_CHANGED', channel: 'Email' },
+        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 },
+        { type: 'INVOICE_CONFIRM_PAYMENT', channel: 'Email' }
+      ],
     };
 
     // Adicionar externalId apenas se fornecido e válido
