@@ -1,6 +1,6 @@
 import express from 'express';
 import { pool } from '../database/connection.js';
-import { createCharge, getChargeStatus, verifyWebhookSignature, processWebhook, checkCredentials } from '../services/ciabra.js';
+import { createCharge, getChargeStatus, getInstallmentPayments, verifyWebhookSignature, processWebhook, checkCredentials } from '../services/ciabra.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -383,53 +383,68 @@ router.post('/charges', authenticateToken, async (req, res) => {
       userId: userId, // Para salvar o ciabra_customer_id após criar
     });
 
-    // A resposta do Ciabra pode ter estrutura diferente
-    // Vamos buscar os detalhes completos da invoice para obter QR Code e Boleto
-    let invoiceDetails = chargeData;
-    if (chargeData.id) {
-      try {
-        // Aguardar um pouco para o Ciabra processar o pagamento
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        invoiceDetails = await getChargeStatus(chargeData.id);
-      } catch (error) {
-        console.warn('Não foi possível buscar detalhes da invoice, usando dados iniciais:', error);
-      }
-    }
-
-    // Extrair dados de pagamento (PIX/Boleto) da invoice
-    // A estrutura pode variar, então tentamos vários formatos
-    const installments = invoiceDetails.installments || [];
-    const firstInstallment = installments[0];
-    const payments = firstInstallment?.payments || [];
-    const firstPayment = payments[0];
-
-    // Tentar extrair PIX e Boleto de diferentes estruturas
+    // Buscar dados completos do PIX/Boleto usando o endpoint de installments
     let pixQrCode = null;
     let pixQrCodeUrl = null;
     let boletoUrl = null;
+    let paymentUrl = null; // URL para redirecionar ou mostrar no modal
 
-    // Buscar PIX
-    if (firstPayment?.pix) {
-      pixQrCode = firstPayment.pix.qrCode || firstPayment.pix.qr_code || firstPayment.pix.code;
-      pixQrCodeUrl = firstPayment.pix.qrCodeUrl || firstPayment.pix.qr_code_url || firstPayment.pix.url;
-    }
-    // Tentar na invoice diretamente
-    if (!pixQrCode && invoiceDetails.pix) {
-      pixQrCode = invoiceDetails.pix.qrCode || invoiceDetails.pix.qr_code || invoiceDetails.pix.code;
-      pixQrCodeUrl = invoiceDetails.pix.qrCodeUrl || invoiceDetails.pix.qr_code_url || invoiceDetails.pix.url;
-    }
+    // Pegar o installmentId da resposta da invoice criada
+    const installments = chargeData.installments || [];
+    const firstInstallment = installments[0];
+    const installmentId = firstInstallment?.id;
 
-    // Buscar Boleto
-    if (firstPayment?.boleto) {
-      boletoUrl = firstPayment.boleto.url || firstPayment.boleto.link;
-    }
-    if (!boletoUrl && invoiceDetails.boleto) {
-      boletoUrl = invoiceDetails.boleto.url || invoiceDetails.boleto.link;
+    if (installmentId) {
+      try {
+        console.log(`📥 Buscando dados do installment: ${installmentId}`);
+        // Aguardar um pouco para o Ciabra processar o pagamento
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Buscar dados completos do installment (PIX/Boleto)
+        const installmentData = await getInstallmentPayments(installmentId);
+        console.log(`✅ Dados do installment recebidos:`, JSON.stringify(installmentData, null, 2));
+
+        // Extrair dados do PIX
+        if (installmentData.pix) {
+          pixQrCode = installmentData.pix.emv || installmentData.pix.qrCode || installmentData.pix.code;
+          pixQrCodeUrl = installmentData.pix.location || installmentData.pix.qrCodeUrl || installmentData.pix.url;
+          console.log(`✅ PIX encontrado - EMV: ${pixQrCode ? pixQrCode.substring(0, 50) + '...' : 'não encontrado'}`);
+        }
+
+        // Extrair dados do Boleto
+        if (installmentData.boleto) {
+          boletoUrl = installmentData.boleto.url || installmentData.boleto.link;
+          console.log(`✅ Boleto encontrado - URL: ${boletoUrl || 'não encontrado'}`);
+        }
+
+        // Pegar URL de pagamento da invoice (se disponível)
+        if (chargeData.url) {
+          paymentUrl = chargeData.url;
+          console.log(`✅ URL de pagamento: ${paymentUrl}`);
+        }
+      } catch (error) {
+        console.warn('⚠️ Não foi possível buscar dados do installment, tentando invoice:', error);
+        // Fallback: tentar buscar da invoice diretamente
+        try {
+          const invoiceDetails = await getChargeStatus(chargeData.id);
+          if (invoiceDetails.url) {
+            paymentUrl = invoiceDetails.url;
+          }
+        } catch (fallbackError) {
+          console.warn('⚠️ Não foi possível buscar detalhes da invoice:', fallbackError);
+        }
+      }
+    } else {
+      console.warn('⚠️ InstallmentId não encontrado na resposta da invoice');
+      // Fallback: usar URL da invoice se disponível
+      if (chargeData.url) {
+        paymentUrl = chargeData.url;
+      }
     }
 
     // Atualizar pagamento com dados do Ciabra
     const updateData = {
-      ciabra_charge_id: chargeData.id || invoiceDetails.id,
+      ciabra_charge_id: chargeData.id,
       ciabra_pix_qr_code: pixQrCode,
       ciabra_pix_qr_code_url: pixQrCodeUrl,
       ciabra_boleto_url: boletoUrl,
@@ -441,13 +456,15 @@ router.post('/charges', authenticateToken, async (req, res) => {
            ciabra_pix_qr_code = $2,
            ciabra_pix_qr_code_url = $3,
            ciabra_boleto_url = $4,
+           ciabra_payment_url = $5,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5`,
+       WHERE id = $6`,
       [
         updateData.ciabra_charge_id,
         updateData.ciabra_pix_qr_code,
         updateData.ciabra_pix_qr_code_url,
         updateData.ciabra_boleto_url,
+        paymentUrl,
         payment.id,
       ]
     );
@@ -475,6 +492,8 @@ router.post('/charges', authenticateToken, async (req, res) => {
         ciabra_pix_qr_code: updateData.ciabra_pix_qr_code,
         ciabra_pix_qr_code_url: updateData.ciabra_pix_qr_code_url,
         ciabra_boleto_url: updateData.ciabra_boleto_url,
+        payment_url: paymentUrl, // URL para redirecionar ou mostrar no modal
+        installment_id: installmentId, // ID do installment para consultas futuras
       },
     });
   } catch (error) {

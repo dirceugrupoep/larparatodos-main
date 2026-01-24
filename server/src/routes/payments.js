@@ -34,6 +34,7 @@ router.get('/', async (req, res) => {
         ciabra_pix_qr_code,
         ciabra_pix_qr_code_url,
         ciabra_boleto_url,
+        ciabra_payment_url,
         notes,
         created_at,
         updated_at

@@ -336,71 +336,36 @@ export async function createInvoice(invoiceData) {
       }
     });
 
-    // TESTE: Usar payload mockado exato do Insomnia (que funcionou)
-    // Apenas substituir o customerId pelo criado
-    console.log('🧪 [createInvoice] MODO TESTE: Usando payload mockado exato do Insomnia');
+    // Garantir ordem final igual ao Insomnia: customerId, description, dueDate, installmentCount, invoiceType, items, price, externalId, paymentTypes, notifications, redirectTo, webhooks
     const finalPayload = {
-      customerId: invoiceData.customerId, // Usar o customerId real criado
-      description: "Contribuição mensal - 10/02/2026",
-      dueDate: "2026-02-10T00:00:00.000Z",
-      installmentCount: 1,
-      invoiceType: "SINGLE",
-      items: [],
-      price: 150,
-      externalId: "1",
-      paymentTypes: [
-        "PIX"
-      ],
-      notifications: [
-        {
-          type: "INVOICE_GENERATED",
-          channel: "Email"
-        },
-        {
-          type: "INVOICE_CHANGED",
-          channel: "Email"
-        },
-        {
-          type: "SEND_INVOICE_REMINDER",
-          channel: "Email",
-          period: 5
-        }
-      ],
-      redirectTo: "https://larparatodoshabitacional.com.br",
-      webhooks: [
-        {
-          hookType: "INVOICE_CREATED",
-          url: "https://larparatodoshabitacional.com.br/api/ciabra/webhook"
-        },
-        {
-          hookType: "PAYMENT_GENERATED",
-          url: "https://larparatodoshabitacional.com.br/api/ciabra/webhook"
-        },
-        {
-          hookType: "PAYMENT_CONFIRMED",
-          url: "https://larparatodoshabitacional.com.br/api/ciabra/webhook"
-        }
-      ]
+      customerId: payload.customerId,
+      description: payload.description,
+      dueDate: payload.dueDate,
+      installmentCount: payload.installmentCount,
+      invoiceType: payload.invoiceType,
+      items: payload.items,
+      price: payload.price,
     };
     
-    // Ajustar paymentTypes se for BOLETO
-    if (normalizedPaymentTypes[0] === 'BOLETO') {
-      finalPayload.paymentTypes = ["BOLETO"];
-      console.log('🧪 [createInvoice] Ajustado paymentTypes para BOLETO');
+    // Adicionar externalId se existir
+    if (payload.externalId) {
+      finalPayload.externalId = payload.externalId;
     }
     
-    // Ajustar description e dueDate se fornecidos
-    if (cleanDescription) {
-      finalPayload.description = cleanDescription;
+    // Adicionar paymentTypes
+    finalPayload.paymentTypes = payload.paymentTypes;
+    
+    // Adicionar notifications
+    finalPayload.notifications = payload.notifications;
+    
+    // Adicionar redirectTo se existir
+    if (payload.redirectTo) {
+      finalPayload.redirectTo = payload.redirectTo;
     }
-    if (invoiceData.dueDate) {
-      finalPayload.dueDate = invoiceData.dueDate;
-    }
-    if (priceNumber) {
-      finalPayload.price = priceNumber;
-    }
-    if (invoiceData.externalId) {
-      finalPayload.externalId = invoiceData.externalId.toString();
+    
+    // Adicionar webhooks se existirem
+    if (payload.webhooks && payload.webhooks.length > 0) {
+      finalPayload.webhooks = payload.webhooks;
     }
 
     console.log(`📤 [createInvoice] Enviando requisição para criar invoice`);

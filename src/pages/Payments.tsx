@@ -47,7 +47,11 @@ const Payments = () => {
   });
   const [creatingCharge, setCreatingCharge] = useState<number | null>(null);
   const [showPixDialog, setShowPixDialog] = useState(false);
+  const [showBoletoDialog, setShowBoletoDialog] = useState(false);
   const [pixQrCode, setPixQrCode] = useState<string>('');
+  const [pixQrCodeUrl, setPixQrCodeUrl] = useState<string>('');
+  const [boletoUrl, setBoletoUrl] = useState<string>('');
+  const [paymentUrl, setPaymentUrl] = useState<string>(''); // URL do Ciabra para redirecionar
 
   useEffect(() => {
     loadData();
@@ -113,11 +117,40 @@ const Payments = () => {
       setCreatingCharge(chargeId);
       const response = await ciabraApi.createCharge(paymentId, method);
       
-      if (method === 'pix' && response.payment.ciabra_pix_qr_code) {
-        setPixQrCode(response.payment.ciabra_pix_qr_code);
-        setShowPixDialog(true);
-      } else if (method === 'boleto' && response.payment.ciabra_boleto_url) {
-        window.open(response.payment.ciabra_boleto_url, '_blank');
+      // Extrair dados da resposta
+      const payment = response.payment || {};
+      const pixCode = payment.ciabra_pix_qr_code || '';
+      const pixUrl = payment.ciabra_pix_qr_code_url || '';
+      const boleto = payment.ciabra_boleto_url || '';
+      const paymentPageUrl = payment.payment_url || '';
+      
+      if (method === 'pix') {
+        if (pixCode) {
+          setPixQrCode(pixCode);
+          setPixQrCodeUrl(pixUrl);
+          setPaymentUrl(paymentPageUrl);
+          setShowPixDialog(true);
+        } else if (paymentPageUrl) {
+          // Se não tiver QR code mas tiver URL, redirecionar
+          window.open(paymentPageUrl, '_blank');
+          toast({
+            title: 'Redirecionando...',
+            description: 'Abrindo página de pagamento PIX',
+          });
+        }
+      } else if (method === 'boleto') {
+        if (boleto) {
+          setBoletoUrl(boleto);
+          setPaymentUrl(paymentPageUrl);
+          setShowBoletoDialog(true);
+        } else if (paymentPageUrl) {
+          // Se não tiver URL do boleto mas tiver URL de pagamento, redirecionar
+          window.open(paymentPageUrl, '_blank');
+          toast({
+            title: 'Redirecionando...',
+            description: 'Abrindo página de pagamento do Boleto',
+          });
+        }
       }
 
       toast({
@@ -395,13 +428,17 @@ const Payments = () => {
                       </>
                     ) : (
                         <>
-                          {stats.nextPayment.ciabra_pix_qr_code_url && (
+                          {(stats.nextPayment.ciabra_pix_qr_code || stats.nextPayment.ciabra_payment_url) && (
                             <Button
                               onClick={() => {
                                 if (stats.nextPayment.ciabra_pix_qr_code) {
                                   setPixQrCode(stats.nextPayment.ciabra_pix_qr_code);
+                                  setPixQrCodeUrl(stats.nextPayment.ciabra_pix_qr_code_url || '');
+                                  setPaymentUrl(stats.nextPayment.ciabra_payment_url || '');
                                   setShowPixDialog(true);
-                                } else {
+                                } else if (stats.nextPayment.ciabra_payment_url) {
+                                  window.open(stats.nextPayment.ciabra_payment_url, '_blank');
+                                } else if (stats.nextPayment.ciabra_pix_qr_code_url) {
                                   window.open(stats.nextPayment.ciabra_pix_qr_code_url, '_blank');
                                 }
                               }}
@@ -583,15 +620,19 @@ const Payments = () => {
                           </>
                         ) : (
                           <>
-                            {payment.ciabra_pix_qr_code_url && (
+                            {(payment.ciabra_pix_qr_code || payment.ciabra_payment_url || payment.ciabra_pix_qr_code_url) && (
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => {
                                   if (payment.ciabra_pix_qr_code) {
                                     setPixQrCode(payment.ciabra_pix_qr_code);
+                                    setPixQrCodeUrl(payment.ciabra_pix_qr_code_url || '');
+                                    setPaymentUrl(payment.ciabra_payment_url || '');
                                     setShowPixDialog(true);
-                                  } else {
+                                  } else if (payment.ciabra_payment_url) {
+                                    window.open(payment.ciabra_payment_url, '_blank');
+                                  } else if (payment.ciabra_pix_qr_code_url) {
                                     window.open(payment.ciabra_pix_qr_code_url, '_blank');
                                   }
                                 }}
@@ -705,11 +746,11 @@ const Payments = () => {
             <div className="space-y-4 py-4">
               {pixQrCode && (
                 <>
-                  <div className="flex justify-center p-4 bg-white rounded-lg">
+                  <div className="flex justify-center p-4 bg-white rounded-lg border-2 border-dashed border-primary/20">
                     <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixQrCode)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(pixQrCode)}`}
                       alt="QR Code PIX"
-                      className="w-48 h-48"
+                      className="w-64 h-64"
                     />
                   </div>
                   <div className="space-y-2">
@@ -724,10 +765,80 @@ const Payments = () => {
                         variant="outline"
                         size="icon"
                         onClick={() => copyToClipboard(pixQrCode)}
+                        title="Copiar código PIX"
                       >
                         <Copy className="w-4 h-4" />
                       </Button>
                     </div>
+                  </div>
+                  {paymentUrl && (
+                    <div className="pt-2 border-t">
+                      <Button
+                        className="w-full"
+                        onClick={() => window.open(paymentUrl, '_blank')}
+                      >
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Pagar na página do Ciabra
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Boleto Dialog */}
+        <Dialog open={showBoletoDialog} onOpenChange={setShowBoletoDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Receipt className="w-5 h-5" />
+                Pagamento via Boleto
+              </DialogTitle>
+              <DialogDescription>
+                Visualize ou baixe o boleto para pagamento
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {boletoUrl && (
+                <>
+                  <div className="space-y-2">
+                    <Label>URL do Boleto</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={boletoUrl}
+                        readOnly
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => copyToClipboard(boletoUrl)}
+                        title="Copiar URL do boleto"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      className="w-full"
+                      onClick={() => window.open(boletoUrl, '_blank')}
+                    >
+                      <ExternalLink className="w-4 h-4 mr-2" />
+                      Abrir Boleto em Nova Aba
+                    </Button>
+                    {paymentUrl && (
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => window.open(paymentUrl, '_blank')}
+                      >
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Pagar na página do Ciabra
+                      </Button>
+                    )}
                   </div>
                 </>
               )}

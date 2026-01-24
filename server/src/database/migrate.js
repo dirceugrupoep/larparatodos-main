@@ -350,6 +350,9 @@ Ao clicar em "Aceito os Termos e Condições", você declara ter lido, compreend
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='ciabra_boleto_url') THEN
           ALTER TABLE payments ADD COLUMN ciabra_boleto_url TEXT;
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='ciabra_payment_url') THEN
+          ALTER TABLE payments ADD COLUMN ciabra_payment_url TEXT;
+        END IF;
       END $$;
     `);
     console.log('✅ Payment Ciabra columns verified');

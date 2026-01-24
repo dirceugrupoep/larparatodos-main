@@ -334,6 +334,7 @@ export interface Payment {
   ciabra_pix_qr_code?: string;
   ciabra_pix_qr_code_url?: string;
   ciabra_boleto_url?: string;
+  ciabra_payment_url?: string; // URL da página de pagamento do Ciabra
   notes?: string;
   created_at: string;
 }
