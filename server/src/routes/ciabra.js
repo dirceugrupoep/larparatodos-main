@@ -363,6 +363,40 @@ router.post('/charges', authenticateToken, async (req, res) => {
     // Criar cobrança no Ciabra
     // Formatar data de forma simples para a descrição
     const dueDateFormatted = new Date(payment.due_date).toLocaleDateString('pt-BR');
+    
+    // IMPORTANTE: Salvar o ciabra_customer_id ANTES de criar a invoice
+    // Isso evita criar múltiplos clientes
+    let customerIdToUse = payment.ciabraCustomerId;
+    
+    // Se não temos o ciabra_customer_id, criar o cliente primeiro e salvar
+    if (!customerIdToUse) {
+      const { createOrGetCustomer } = await import('../services/ciabra.js');
+      const customer = await createOrGetCustomer({
+        name: payment.name,
+        email: payment.email,
+        document: payment.cpf,
+        phone: payment.phone,
+        ciabraCustomerId: null, // Não temos ainda
+        address: payment.address,
+        city: payment.city,
+        state: payment.state,
+        zipCode: payment.zip_code,
+      });
+      
+      customerIdToUse = customer.id;
+      
+      // Salvar imediatamente no banco
+      if (customerIdToUse && userId) {
+        await pool.query(
+          `UPDATE users 
+           SET ciabra_customer_id = $1
+           WHERE id = $2 AND (ciabra_customer_id IS NULL OR ciabra_customer_id != $1)`,
+          [customerIdToUse, userId]
+        );
+        console.log(`✅ Salvo ciabra_customer_id ${customerIdToUse} para usuário ${userId} (antes de criar invoice)`);
+      }
+    }
+    
     const chargeData = await createCharge({
       amount: parseFloat(payment.amount),
       due_date: payment.due_date,
@@ -372,7 +406,7 @@ router.post('/charges', authenticateToken, async (req, res) => {
         email: payment.email,
         document: payment.cpf,
         phone: payment.phone,
-        ciabraCustomerId: payment.ciabraCustomerId, // Reutilizar se já existir
+        ciabraCustomerId: customerIdToUse, // Usar o ID que acabamos de obter/salvar
         address: payment.address,
         city: payment.city,
         state: payment.state,
@@ -380,7 +414,7 @@ router.post('/charges', authenticateToken, async (req, res) => {
       },
       payment_method,
       externalId: payment.id.toString(), // ID do nosso pagamento
-      userId: userId, // Para salvar o ciabra_customer_id após criar
+      userId: userId, // Para salvar o ciabra_customer_id após criar (fallback)
     });
 
     // Buscar dados completos do PIX/Boleto usando o endpoint de installments

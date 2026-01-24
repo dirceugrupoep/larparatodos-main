@@ -117,6 +117,17 @@ const Payments = () => {
       setCreatingCharge(chargeId);
       const response = await ciabraApi.createCharge(paymentId, method);
       
+      // Verificar se é uma resposta parcial (erro 500 mas invoice pode ter sido criada)
+      if (response.partial) {
+        toast({
+          title: 'Atenção',
+          description: response.warning || 'A cobrança pode ter sido criada, mas os dados não estão disponíveis ainda. Aguarde o webhook ou verifique no painel do Ciabra.',
+          variant: 'default',
+        });
+        loadData();
+        return;
+      }
+      
       // Extrair dados da resposta
       const payment = response.payment || {};
       const pixCode = payment.ciabra_pix_qr_code || '';

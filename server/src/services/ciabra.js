@@ -431,29 +431,12 @@ export async function createInvoice(invoiceData) {
         }
       }
       
-      // Se for erro 500, tentar buscar a invoice criada (pode ter sido criada mesmo com erro)
-      if (response.status === 500 && invoiceData.externalId && invoiceData.customerId) {
-        console.warn('⚠️ [createInvoice] Erro 500 detectado. Aguardando 3 segundos e tentando buscar invoice criada...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        try {
-          // Tentar buscar invoices do cliente e encontrar a que tem o externalId correto
-          console.log(`🔍 [createInvoice] Tentando buscar invoice com externalId: ${invoiceData.externalId} e customerId: ${invoiceData.customerId}`);
-          
-          // Buscar invoices do cliente (se houver endpoint para isso)
-          // Por enquanto, vamos tentar buscar a invoice mais recente usando getInvoiceDetails
-          // Mas não temos o ID ainda... Vou tentar uma abordagem diferente
-          
-          // Tentar buscar pelo externalId usando um endpoint de busca (se existir)
-          // Por enquanto, vamos apenas logar e continuar com o erro
-          console.warn('⚠️ [createInvoice] Não foi possível recuperar invoice automaticamente. A invoice pode ter sido criada no Ciabra.');
-          console.warn('⚠️ [createInvoice] Recomendação: Verificar manualmente no painel do Ciabra ou aguardar webhook.');
-        } catch (recoveryError) {
-          console.error('❌ [createInvoice] Erro ao tentar recuperar invoice:', recoveryError);
-        }
-      }
-      
-      throw new Error(`Erro ao criar invoice: ${JSON.stringify(data || responseText)}`);
+      // Criar erro customizado com status HTTP para que createCharge possa detectar erro 500
+      const error = new Error(`Erro ao criar invoice: ${JSON.stringify(data || responseText)}`);
+      error.status = response.status;
+      error.statusCode = response.status;
+      error.is500Error = response.status === 500;
+      throw error;
     }
 
     console.log('✅ [createInvoice] Invoice criado com sucesso!');
@@ -701,7 +684,7 @@ export async function createCharge(chargeData) {
       console.log('🟣 [createCharge] Invoice criada:', JSON.stringify(invoice, null, 2));
     } catch (invoiceError) {
       // Se for erro 500, a invoice pode ter sido criada mesmo assim
-      if (invoiceError.message && invoiceError.message.includes('500')) {
+      if (invoiceError.is500Error || invoiceError.statusCode === 500 || (invoiceError.message && invoiceError.message.includes('500'))) {
         console.warn('⚠️ [createCharge] Erro 500 ao criar invoice, mas invoice pode ter sido criada no Ciabra');
         console.warn('⚠️ [createCharge] Aguardando 5 segundos e tentando construir resposta parcial...');
         await new Promise(resolve => setTimeout(resolve, 5000));
@@ -717,6 +700,7 @@ export async function createCharge(chargeData) {
           dueDate: invoiceData.dueDate,
           description: invoiceData.description,
           paymentTypes: invoiceData.paymentTypes,
+          installments: [], // Array vazio pois não temos os dados
           _partial: true, // Flag indicando que é uma resposta parcial
           _error: 'Invoice pode ter sido criada no Ciabra, mas não foi possível recuperar os dados. Aguarde o webhook ou verifique no painel.',
         };
