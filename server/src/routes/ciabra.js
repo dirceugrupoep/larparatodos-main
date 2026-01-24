@@ -222,9 +222,19 @@ router.post('/charges', authenticateToken, async (req, res) => {
     let payment;
 
     if (payment_id) {
-      // Buscar pagamento existente
+      // Buscar pagamento existente (incluindo dados de perfil para endereço)
       const paymentResult = await pool.query(
-        `SELECT p.*, u.name, u.email, u.phone, u.payment_day, up.cpf
+        `SELECT p.*, 
+                u.name, 
+                u.email, 
+                u.phone, 
+                u.payment_day, 
+                u.ciabra_customer_id,
+                up.cpf,
+                up.address,
+                up.city,
+                up.state,
+                up.zip_code
          FROM payments p
          JOIN users u ON p.user_id = u.id
          LEFT JOIN user_profiles up ON u.id = up.user_id
@@ -240,7 +250,8 @@ router.post('/charges', authenticateToken, async (req, res) => {
     } else {
       // Criar novo pagamento baseado no payment_day do usuário
       const userResult = await pool.query(
-        `SELECT u.id, u.name, u.email, u.phone, u.payment_day, up.cpf
+        `SELECT u.id, u.name, u.email, u.phone, u.payment_day, u.ciabra_customer_id, 
+                up.cpf, up.address, up.city, up.state, up.zip_code
          FROM users u
          LEFT JOIN user_profiles up ON u.id = up.user_id
          WHERE u.id = $1`,
@@ -253,6 +264,9 @@ router.post('/charges', authenticateToken, async (req, res) => {
 
       const user = userResult.rows[0];
       const paymentDay = user.payment_day || 10;
+      
+      // Adicionar ciabra_customer_id ao objeto user para uso posterior
+      user.ciabra_customer_id = user.ciabra_customer_id;
 
       // Calcular próxima data de vencimento
       const today = new Date();
@@ -285,7 +299,8 @@ router.post('/charges', authenticateToken, async (req, res) => {
         payment = existingPayment.rows[0];
         // Buscar dados do usuário para o pagamento existente
         const userDataResult = await pool.query(
-          `SELECT u.name, u.email, u.phone, up.cpf
+          `SELECT u.name, u.email, u.phone, u.ciabra_customer_id, 
+                  up.cpf, up.address, up.city, up.state, up.zip_code
            FROM users u
            LEFT JOIN user_profiles up ON u.id = up.user_id
            WHERE u.id = $1`,
@@ -298,6 +313,11 @@ router.post('/charges', authenticateToken, async (req, res) => {
             email: userDataResult.rows[0].email,
             phone: userDataResult.rows[0].phone,
             cpf: userDataResult.rows[0].cpf,
+            ciabraCustomerId: userDataResult.rows[0].ciabra_customer_id,
+            address: userDataResult.rows[0].address,
+            city: userDataResult.rows[0].city,
+            state: userDataResult.rows[0].state,
+            zip_code: userDataResult.rows[0].zip_code,
           };
         }
       } else {
@@ -316,6 +336,11 @@ router.post('/charges', authenticateToken, async (req, res) => {
           email: user.email,
           phone: user.phone,
           cpf: user.cpf,
+          ciabraCustomerId: user.ciabra_customer_id || null,
+          address: user.address,
+          city: user.city,
+          state: user.state,
+          zip_code: user.zip_code,
         };
       }
     }
@@ -347,9 +372,15 @@ router.post('/charges', authenticateToken, async (req, res) => {
         email: payment.email,
         document: payment.cpf,
         phone: payment.phone,
+        ciabraCustomerId: payment.ciabraCustomerId, // Reutilizar se já existir
+        address: payment.address,
+        city: payment.city,
+        state: payment.state,
+        zipCode: payment.zip_code,
       },
       payment_method,
       externalId: payment.id.toString(), // ID do nosso pagamento
+      userId: userId, // Para salvar o ciabra_customer_id após criar
     });
 
     // A resposta do Ciabra pode ter estrutura diferente
@@ -420,6 +451,17 @@ router.post('/charges', authenticateToken, async (req, res) => {
         payment.id,
       ]
     );
+
+    // Salvar ciabra_customer_id no usuário (se ainda não tiver e se tiver customerId na resposta)
+    if (chargeData.customerId && userId) {
+      await pool.query(
+        `UPDATE users 
+         SET ciabra_customer_id = $1
+         WHERE id = $2 AND ciabra_customer_id IS NULL`,
+        [chargeData.customerId, userId]
+      );
+      console.log(`✅ Salvo ciabra_customer_id ${chargeData.customerId} para usuário ${userId}`);
+    }
 
     res.json({
       message: 'Cobrança criada com sucesso',

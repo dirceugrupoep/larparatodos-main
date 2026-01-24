@@ -21,9 +21,13 @@ const registerSchema = z.object({
     .max(100, 'Senha muito longa'),
   phone: z.string().max(20).optional(),
   association_id: z.number().int().positive().optional(),
-  payment_day: z.number().int().refine((val) => val === 10 || val === 20, {
-    message: 'Dia de pagamento deve ser 10 ou 20',
-  }).optional(),
+  // Agora permitimos qualquer dia entre 1 e 31
+  payment_day: z.number().int().refine(
+    (val) => val >= 1 && val <= 31,
+    {
+      message: 'Dia de pagamento deve ser entre 1 e 31',
+    }
+  ).optional(),
 });
 
 const loginSchema = z.object({

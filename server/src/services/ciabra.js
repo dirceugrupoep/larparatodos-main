@@ -57,23 +57,60 @@ export async function checkCredentials() {
 /**
  * Cria ou busca um cliente no Ciabra
  * POST /invoices/applications/customers
+ * @param {Object} customerData - Dados do cliente
+ * @param {string} customerData.name - Nome completo
+ * @param {string} customerData.document - CPF/CNPJ
+ * @param {string} customerData.email - Email
+ * @param {string} customerData.phone - Telefone
+ * @param {string} customerData.ciabraCustomerId - ID do cliente no Ciabra (se já existe)
+ * @param {string} [customerData.address] - Endereço (rua + número)
+ * @param {string} [customerData.city] - Cidade
+ * @param {string} [customerData.state] - UF
+ * @param {string} [customerData.zipCode] - CEP
+ * @returns {Promise<Object>} Dados do cliente no Ciabra
  */
 export async function createOrGetCustomer(customerData) {
   try {
+    // Se já temos o ID do cliente no Ciabra, retornar direto (sem fazer chamada)
+    if (customerData.ciabraCustomerId) {
+      console.log(`✅ Usando cliente existente no Ciabra: ${customerData.ciabraCustomerId}`);
+      return { id: customerData.ciabraCustomerId };
+    }
+
     const authToken = getAuthToken();
-    
-    // Primeiro, tentar buscar cliente existente pelo documento
-    // (A API pode não ter endpoint de busca, então criamos sempre)
-    
+
+    // Endereço padrão caso o usuário ainda não tenha endereço completo cadastrado
+    const defaultZip = '03318000';
+    const defaultStreet = 'Rua Serra de Bragança, 124';
+    const defaultNeighborhood = 'Vila Gomes Cardim';
+    const defaultCity = 'São Paulo';
+    const defaultState = 'SP';
+
+    const cleanZip = (customerData.zipCode || defaultZip).replace(/\D/g, '');
+    const addressLine = customerData.address || `${defaultStreet} - ${defaultNeighborhood}`;
+
     const payload = {
       fullName: customerData.name,
       document: customerData.document?.replace(/\D/g, ''), // Remove formatação
       email: customerData.email || undefined,
       phone: customerData.phone ? `+55${customerData.phone.replace(/\D/g, '')}` : undefined,
+      // Campos de endereço - a API do Ciabra pode ignorar chaves extras,
+      // mas se aceitar, isso garante que boletos tenham endereço do pagador.
+      address: addressLine,
+      city: customerData.city || defaultCity,
+      state: customerData.state || defaultState,
+      zipCode: cleanZip,
+      neighborhood: defaultNeighborhood,
     };
 
-    // Remover campos undefined
-    Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
+    // Remover campos undefined/null
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === undefined || payload[key] === null) {
+        delete payload[key];
+      }
+    });
+
+    console.log(`📤 Criando/buscando cliente no Ciabra: ${payload.fullName} (${payload.document})`);
 
     const response = await fetch(`${CIABRA_API_URL}/invoices/applications/customers`, {
       method: 'POST',
@@ -92,6 +129,7 @@ export async function createOrGetCustomer(customerData) {
     }
 
     const data = await response.json();
+    console.log(`✅ Cliente criado/encontrado no Ciabra: ${data.id}`);
     return data;
   } catch (error) {
     console.error('Erro ao criar/buscar cliente:', error);
@@ -348,10 +386,18 @@ export function processWebhook(webhookData) {
 /**
  * Função auxiliar para criar cobrança completa (cliente + invoice)
  * Esta função é usada pela rota /api/ciabra/charges
+ * @param {Object} chargeData - Dados da cobrança
+ * @param {Object} chargeData.customer - Dados do cliente (pode incluir ciabraCustomerId)
+ * @param {number} chargeData.amount - Valor em reais
+ * @param {string} chargeData.due_date - Data de vencimento
+ * @param {string} chargeData.description - Descrição
+ * @param {string} chargeData.externalId - ID externo (nosso payment_id)
+ * @param {string} chargeData.payment_method - Método de pagamento ('pix' ou 'boleto')
+ * @returns {Promise<Object>} Dados da invoice criada
  */
 export async function createCharge(chargeData) {
   try {
-    // 1. Criar ou buscar cliente
+    // 1. Criar ou buscar cliente (reutiliza se já tiver ciabraCustomerId)
     const customer = await createOrGetCustomer(chargeData.customer);
     
     // 2. Criar invoice
@@ -363,6 +409,9 @@ export async function createCharge(chargeData) {
       externalId: chargeData.externalId?.toString(),
       paymentTypes: chargeData.payment_method === 'boleto' ? ['BOLETO'] : ['PIX'],
     });
+
+    // Adicionar customerId à resposta para salvar no banco
+    invoice.customerId = customer.id;
 
     return invoice;
   } catch (error) {

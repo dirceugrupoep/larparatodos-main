@@ -23,6 +23,9 @@ const Register = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [associations, setAssociations] = useState<Association[]>([]);
   const [isLoadingAssociations, setIsLoadingAssociations] = useState(true);
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -30,7 +33,10 @@ const Register = () => {
     confirmPassword: '',
     phone: '',
     association_id: undefined as number | undefined,
-    payment_day: undefined as 10 | 20 | undefined,
+    // Guardamos o dia do mês escolhido (1-31)
+    payment_day: today.getDate() as number,
+    // Data completa apenas para o campo de calendário
+    payment_date: todayStr,
     acceptedTerms: false,
   });
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -97,15 +103,6 @@ const Register = () => {
       toast({
         title: 'Erro',
         description: 'Por favor, selecione uma associação',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!formData.payment_day) {
-      toast({
-        title: 'Erro',
-        description: 'Por favor, selecione o dia de pagamento',
         variant: 'destructive',
       });
       return;
@@ -274,22 +271,23 @@ const Register = () => {
                 <label className="text-sm font-medium text-foreground mb-1.5 block">
                   Dia de Pagamento <span className="text-red-500">*</span>
                 </label>
-                <Select
-                  value={formData.payment_day?.toString() || ''}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, payment_day: parseInt(value) as 10 | 20 })
-                  }
-                >
-                  <SelectTrigger className="h-12">
-                    <SelectValue placeholder="Selecione o dia de pagamento" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">Dia 10 de cada mês</SelectItem>
-                    <SelectItem value="20">Dia 20 de cada mês</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Input
+                  type="date"
+                  value={formData.payment_date}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    const date = new Date(value);
+                    const day = date.getDate();
+                    setFormData({
+                      ...formData,
+                      payment_date: value,
+                      payment_day: day,
+                    });
+                  }}
+                  className="h-12"
+                />
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  Você sempre pagará nesta data. Escolha com cuidado.
+                  Escolha a data do primeiro vencimento. Vamos usar o mesmo dia em todos os meses seguintes.
                 </p>
               </div>
 

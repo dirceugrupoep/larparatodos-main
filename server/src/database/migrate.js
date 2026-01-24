@@ -109,8 +109,19 @@ async function runMigrations() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='association_id') THEN
           ALTER TABLE users ADD COLUMN association_id INTEGER REFERENCES associations(id) ON DELETE SET NULL;
         END IF;
+        -- payment_day agora aceita qualquer dia entre 1 e 31
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='payment_day') THEN
-          ALTER TABLE users ADD COLUMN payment_day INTEGER CHECK (payment_day IN (10, 20));
+          ALTER TABLE users ADD COLUMN payment_day INTEGER;
+        END IF;
+        -- Ajustar constraint de payment_day para permitir valores de 1 a 31 (ou NULL)
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_payment_day_check') THEN
+          ALTER TABLE users DROP CONSTRAINT users_payment_day_check;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_payment_day_check') THEN
+          ALTER TABLE users ADD CONSTRAINT users_payment_day_check CHECK (payment_day IS NULL OR (payment_day >= 1 AND payment_day <= 31));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='ciabra_customer_id') THEN
+          ALTER TABLE users ADD COLUMN ciabra_customer_id VARCHAR(255);
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='associations' AND column_name='password') THEN
           ALTER TABLE associations ADD COLUMN password VARCHAR(255);
