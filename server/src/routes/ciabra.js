@@ -389,10 +389,16 @@ router.post('/charges', authenticateToken, async (req, res) => {
     let boletoUrl = null;
     let paymentUrl = null; // URL para redirecionar ou mostrar no modal
 
+    console.log('📋 [ciabra/charges] Resposta da invoice criada:', JSON.stringify(chargeData, null, 2));
+    
     // Pegar o installmentId da resposta da invoice criada
     const installments = chargeData.installments || [];
+    console.log(`📋 [ciabra/charges] Installments encontrados: ${installments.length}`);
+    console.log(`📋 [ciabra/charges] Installments:`, JSON.stringify(installments, null, 2));
+    
     const firstInstallment = installments[0];
     const installmentId = firstInstallment?.id;
+    console.log(`📋 [ciabra/charges] InstallmentId extraído: ${installmentId || 'não encontrado'}`);
 
     if (installmentId) {
       try {
@@ -439,7 +445,14 @@ router.post('/charges', authenticateToken, async (req, res) => {
       // Fallback: usar URL da invoice se disponível
       if (chargeData.url) {
         paymentUrl = chargeData.url;
+        console.log(`✅ URL de pagamento (fallback): ${paymentUrl}`);
       }
+    }
+
+    // Garantir que sempre temos pelo menos a URL de pagamento se disponível
+    if (!paymentUrl && chargeData.url) {
+      paymentUrl = chargeData.url;
+      console.log(`✅ URL de pagamento (garantia final): ${paymentUrl}`);
     }
 
     // Atualizar pagamento com dados do Ciabra

@@ -392,24 +392,42 @@ export async function createInvoice(invoiceData) {
     console.log(`🟢 [createInvoice] Resposta recebida - Status: ${response.status} ${response.statusText}`);
     console.log(`🟢 [createInvoice] Headers da resposta:`, JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ [createInvoice] Erro ao criar invoice no Ciabra');
-      console.error(`❌ [createInvoice] Status HTTP: ${response.status} ${response.statusText}`);
-      console.error(`❌ [createInvoice] Corpo da resposta (texto):`, errorText);
-      let errorData;
-      try {
-        errorData = JSON.parse(errorText);
-        console.error(`❌ [createInvoice] Corpo da resposta (JSON):`, JSON.stringify(errorData, null, 2));
-      } catch {
-        errorData = errorText;
-        console.error(`❌ [createInvoice] Não foi possível parsear como JSON`);
-      }
-      console.error('❌ [createInvoice] Headers:', Object.fromEntries(response.headers.entries()));
-      throw new Error(`Erro ao criar invoice: ${JSON.stringify(errorData)}`);
+    // Tentar ler a resposta como JSON primeiro (mesmo em caso de erro)
+    let responseText;
+    try {
+      responseText = await response.text();
+    } catch (e) {
+      responseText = '';
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      console.error('❌ [createInvoice] Erro ao criar invoice no Ciabra');
+      console.error(`❌ [createInvoice] Status HTTP: ${response.status} ${response.statusText}`);
+      console.error(`❌ [createInvoice] Corpo da resposta (texto):`, responseText);
+      console.error(`❌ [createInvoice] Corpo da resposta (JSON):`, JSON.stringify(data, null, 2));
+      console.error('❌ [createInvoice] Headers:', Object.fromEntries(response.headers.entries()));
+      
+      // Se mesmo com erro 500, a resposta contém dados da invoice (id, installments), usar esses dados
+      if (data && (data.id || data.installments)) {
+        console.warn('⚠️ [createInvoice] Erro 500, mas resposta contém dados da invoice. Tentando usar os dados disponíveis...');
+        console.warn(`⚠️ [createInvoice] Invoice ID encontrado: ${data.id || 'não encontrado'}`);
+        console.warn(`⚠️ [createInvoice] Installments encontrados: ${data.installments?.length || 0}`);
+        if (data.id && data.installments && data.installments.length > 0) {
+          console.warn('✅ [createInvoice] Dados suficientes encontrados, retornando invoice mesmo com erro 500');
+          return data;
+        }
+      }
+      
+      throw new Error(`Erro ao criar invoice: ${JSON.stringify(data || responseText)}`);
+    }
+
     console.log('✅ [createInvoice] Invoice criado com sucesso!');
     console.log(`✅ [createInvoice] ID da invoice: ${data.id}`);
     console.log(`✅ [createInvoice] Dados completos da resposta:`, JSON.stringify(data, null, 2));
