@@ -263,6 +263,7 @@ export async function createInvoice(invoiceData) {
     console.log(`✅ [createInvoice] paymentTypes normalizado (array de strings):`, JSON.stringify(normalizedPaymentTypes));
 
     // Construir payload base (exatamente como funcionou no Insomnia)
+    // IMPORTANTE: Ordem dos campos igual ao Insomnia
     console.log('🟢 [createInvoice] Construindo payload base...');
     const payload = {
       customerId: invoiceData.customerId,
@@ -272,13 +273,16 @@ export async function createInvoice(invoiceData) {
       invoiceType: 'SINGLE',
       items: [], // Array vazio (como no Insomnia que funcionou)
       price: priceNumber, // Valor em reais (não centavos)
+      // externalId será adicionado depois (se existir)
       paymentTypes: normalizedPaymentTypes,
       // Notifications exatamente como no Insomnia (3 itens, sem INVOICE_CONFIRM_PAYMENT)
       notifications: [
         { type: 'INVOICE_GENERATED', channel: 'Email' },
         { type: 'INVOICE_CHANGED', channel: 'Email' },
-        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 }
+        { type: 'SEND_INVOICE_REMINDER', channel: 'Email', period: 5 } // Número inteiro, não parseInt
       ],
+      // redirectTo será adicionado depois
+      // webhooks serão adicionados depois
     };
     console.log('🟢 [createInvoice] Payload base montado:', JSON.stringify(payload, null, 2));
 
@@ -301,7 +305,7 @@ export async function createInvoice(invoiceData) {
     payload.redirectTo = redirectUrl;
     console.log(`🟢 [createInvoice] redirectTo adicionado: ${redirectUrl}`);
 
-    // Adicionar webhooks apenas se a URL for válida
+    // Adicionar webhooks apenas se a URL for válida (exatamente como no Insomnia)
     console.log('🟢 [createInvoice] Verificando webhooks...');
     if (webhookUrl && webhookUrl.startsWith('http')) {
       payload.webhooks = [
@@ -332,19 +336,57 @@ export async function createInvoice(invoiceData) {
       }
     });
 
+    // Garantir ordem final igual ao Insomnia: customerId, description, dueDate, installmentCount, invoiceType, items, price, externalId, paymentTypes, notifications, redirectTo, webhooks
+    const finalPayload = {
+      customerId: payload.customerId,
+      description: payload.description,
+      dueDate: payload.dueDate,
+      installmentCount: payload.installmentCount,
+      invoiceType: payload.invoiceType,
+      items: payload.items,
+      price: payload.price,
+    };
+    
+    // Adicionar externalId se existir
+    if (payload.externalId) {
+      finalPayload.externalId = payload.externalId;
+    }
+    
+    // Adicionar paymentTypes
+    finalPayload.paymentTypes = payload.paymentTypes;
+    
+    // Adicionar notifications
+    finalPayload.notifications = payload.notifications;
+    
+    // Adicionar redirectTo se existir
+    if (payload.redirectTo) {
+      finalPayload.redirectTo = payload.redirectTo;
+    }
+    
+    // Adicionar webhooks se existirem
+    if (payload.webhooks && payload.webhooks.length > 0) {
+      finalPayload.webhooks = payload.webhooks;
+    }
+
     console.log(`📤 [createInvoice] Enviando requisição para criar invoice`);
     console.log(`📤 [createInvoice] Cliente ID: ${invoiceData.customerId}`);
     console.log(`📤 [createInvoice] URL: ${CIABRA_API_URL}/invoices/applications/invoices`);
-    console.log(`📤 [createInvoice] Payload final completo:`, JSON.stringify(payload, null, 2));
+    console.log(`📤 [createInvoice] Payload final completo (ordenado):`, JSON.stringify(finalPayload, null, 2));
+    
+    // Log do JSON exato que será enviado (sem espaços, para comparar byte a byte)
+    const jsonString = JSON.stringify(finalPayload);
+    console.log(`📤 [createInvoice] JSON exato que será enviado (compacto):`, jsonString);
+    console.log(`📤 [createInvoice] Tamanho do JSON: ${jsonString.length} bytes`);
 
     const response = await fetch(`${CIABRA_API_URL}/invoices/applications/invoices`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Authorization': authToken,
+        'Accept': 'application/json',
       },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
+      body: jsonString,
+      signal: AbortSignal.timeout(30000), // Aumentar timeout para 30s
     });
 
     console.log(`🟢 [createInvoice] Resposta recebida - Status: ${response.status} ${response.statusText}`);
@@ -573,6 +615,14 @@ export async function createCharge(chargeData) {
     const customer = await createOrGetCustomer(chargeData.customer);
     console.log('🟣 [createCharge] Cliente obtido:', JSON.stringify(customer, null, 2));
     console.log(`🟣 [createCharge] Cliente ID: ${customer.id}`);
+    
+    // Aguardar um pouco para o Ciabra processar o cliente recém-criado
+    // (especialmente importante se o cliente foi criado agora)
+    if (!chargeData.customer?.ciabraCustomerId) {
+      console.log('🟣 [createCharge] Cliente foi criado agora, aguardando 1 segundo para processamento...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('🟣 [createCharge] Aguardo concluído, prosseguindo...');
+    }
     
     // 2. Criar invoice
     console.log('🟣 [createCharge] ========================================');
