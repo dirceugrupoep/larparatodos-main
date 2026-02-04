@@ -630,21 +630,31 @@ Versão: 1.0`;
         }
         console.log(`✅ Seed de usuários fake concluído: ${inserted} inseridos.`);
 
-        // 5b. Criar 1 ou 2 parcelas pagas por usuário fake (para balanço do admin fake)
+        // 5b. Parcelas para usuários fake: apenas 2889 com 1-2 parcelas PAGAS; o restante tudo À VENCER
+        const QUANTOS_COM_PAGAMENTO_PAGO = 2889;
         const fakeUserIds = await pool.query(`
           SELECT u.id FROM users u
           WHERE u.fake = true
           AND NOT EXISTS (SELECT 1 FROM payments WHERE user_id = u.id)
           ORDER BY u.id
         `);
-        const userIds = fakeUserIds.rows.map((r) => r.id);
+        let userIds = fakeUserIds.rows.map((r) => r.id);
         if (userIds.length > 0) {
-          console.log(`🌱 Criando 1-2 parcelas pagas por usuário fake (${userIds.length} usuários)...`);
-          const paymentRows = [];
+          // Embaralhar para escolher aleatoriamente quem terá parcelas pagas
+          for (let i = userIds.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [userIds[i], userIds[j]] = [userIds[j], userIds[i]];
+          }
+          const usersComPago = userIds.slice(0, Math.min(QUANTOS_COM_PAGAMENTO_PAGO, userIds.length));
+          const usersAVencer = userIds.slice(usersComPago.length);
+
           const now = new Date();
-          for (const uid of userIds) {
+          const paymentRows = [];
+
+          // 2889 usuários: 1 ou 2 parcelas PAGAS
+          for (const uid of usersComPago) {
             const numParcelas = Math.random() < 0.5 ? 1 : 2;
-            const baseMonth = 2 + Math.floor(Math.random() * 10); // meses atrás
+            const baseMonth = 2 + Math.floor(Math.random() * 10);
             for (let p = 0; p < numParcelas; p++) {
               const dueDate = new Date(now.getFullYear(), now.getMonth() - baseMonth - p, 10);
               const paidDate = new Date(dueDate);
@@ -658,15 +668,35 @@ Versão: 1.0`;
               });
             }
           }
+
+          // Restante: 1 ou 2 parcelas À VENCER (pending)
+          for (const uid of usersAVencer) {
+            const numParcelas = Math.random() < 0.5 ? 1 : 2;
+            for (let p = 0; p < numParcelas; p++) {
+              const dueDate = new Date(now.getFullYear(), now.getMonth() + p, 10);
+              paymentRows.push({
+                user_id: uid,
+                amount: 150,
+                due_date: dueDate.toISOString().split('T')[0],
+                paid_date: null,
+                status: 'pending'
+              });
+            }
+          }
+
           const PAYMENT_BATCH = 1000;
           for (let i = 0; i < paymentRows.length; i += PAYMENT_BATCH) {
             const batch = paymentRows.slice(i, i + PAYMENT_BATCH);
-            const values = batch.map((b) => `(${b.user_id}, ${b.amount}, '${b.due_date}', '${b.paid_date}', '${b.status}')`).join(', ');
+            const values = batch.map((b) =>
+              b.paid_date
+                ? `(${b.user_id}, ${b.amount}, '${b.due_date}', '${b.paid_date}', '${b.status}')`
+                : `(${b.user_id}, ${b.amount}, '${b.due_date}', NULL, '${b.status}')`
+            ).join(', ');
             await pool.query(
               `INSERT INTO payments (user_id, amount, due_date, paid_date, status) VALUES ${values}`
             );
           }
-          console.log(`✅ ${paymentRows.length} parcelas pagas criadas para usuários fake.`);
+          console.log(`✅ Parcelas criadas: ${usersComPago.length} usuários com 1-2 pagas; ${usersAVencer.length} usuários com parcelas à vencer.`);
         }
       }
     }
