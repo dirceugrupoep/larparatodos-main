@@ -361,7 +361,7 @@ const AdminAssociationDetails = () => {
                           )}
                         </div>
                         <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                          <span>Parcelas: {user.paid_payments || 0}/{TOTAL_PARCELAS_MESES} (240 meses)</span>
+                          <span>Parcelas: {user.paid_payments || 0}/{TOTAL_PARCELAS_MESES}</span>
                           <span>Total pago: {formatCurrency(parseFloat(user.total_paid) || 0)}</span>
                         </div>
                       </div>

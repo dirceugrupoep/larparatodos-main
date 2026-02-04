@@ -293,7 +293,7 @@ const AdminUsersPage = () => {
                               Total pago: {formatCurrency(parseFloat(user.total_paid || '0'))}
                             </div>
                             <div className="flex items-center gap-2 text-muted-foreground min-w-0">
-                              Parcelas: {user.paid_payments}/{TOTAL_PARCELAS_MESES} (240 meses)
+                              Parcelas: {user.paid_payments}/{TOTAL_PARCELAS_MESES}
                             </div>
                           </div>
                         </div>

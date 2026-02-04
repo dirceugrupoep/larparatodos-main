@@ -5,7 +5,6 @@ import {
   DollarSign,
   TrendingUp,
   TrendingDown,
-  Mail,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -670,77 +669,6 @@ const AdminDashboardPage = () => {
           </Card>
         </motion.div>
 
-        {/* Métricas de Contatos */}
-        <div>
-          <h3 className="text-xl font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Mail className="w-5 h-5" />
-            Contatos
-          </h3>
-          <div className="grid md:grid-cols-3 gap-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 2.3, type: 'spring' }}
-              whileHover={{ scale: 1.05 }}
-            >
-              <Card className="relative overflow-hidden border-2 border-blue-500/20 hover:border-blue-500/40 transition-all group bg-gradient-to-br from-blue-500/5 to-blue-500/10">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl" />
-                <CardHeader className="pb-2 relative z-10">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Total de Contatos
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <div className="text-4xl font-bold text-blue-500">
-                    {data.contacts.total}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 2.4, type: 'spring' }}
-              whileHover={{ scale: 1.05 }}
-            >
-              <Card className="relative overflow-hidden border-2 border-purple-500/20 hover:border-purple-500/40 transition-all group bg-gradient-to-br from-purple-500/5 to-purple-500/10">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl" />
-                <CardHeader className="pb-2 relative z-10">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Contatos Hoje
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <div className="text-4xl font-bold text-purple-500">
-                    {data.contacts.today}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 2.5, type: 'spring' }}
-              whileHover={{ scale: 1.05 }}
-            >
-              <Card className="relative overflow-hidden border-2 border-pink-500/20 hover:border-pink-500/40 transition-all group bg-gradient-to-br from-pink-500/5 to-pink-500/10">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/10 rounded-full blur-2xl" />
-                <CardHeader className="pb-2 relative z-10">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Contatos no Mês
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="relative z-10">
-                  <div className="text-4xl font-bold text-pink-500">
-                    {data.contacts.thisMonth}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
-        </div>
       </div>
     </AdminLayout>
   );

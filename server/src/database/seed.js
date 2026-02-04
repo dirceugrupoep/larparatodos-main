@@ -663,13 +663,25 @@ Versão: 1.0`;
         }
         console.log(`✅ Seed de usuários fake concluído: ${inserted} inseridos.`);
 
-        // 5a. Distribuir created_at dos usuários fake nos últimos 12 meses (para "Novos Hoje" / "Novos no Mês" não serem 26k)
+        // 5a. Distribuir created_at dos usuários fake nos últimos 2 meses (evitar "todos cadastros hoje")
         await pool.query(`
           UPDATE users
           SET created_at = NOW() - (random() * INTERVAL '60 days')
           WHERE fake = true
         `);
-        console.log('   created_at dos fakes distribuído nos últimos 12 meses.');
+        console.log('   created_at dos fakes distribuído nos últimos 2 meses.');
+
+        // 5a1. Atualizar e-mails de usuários fake que ainda tenham padrão antigo (fake_... ou @fake.)
+        const oldFakeEmails = await pool.query(`
+          SELECT id, name FROM users WHERE fake = true AND (email LIKE 'fake_%' OR email LIKE '%@fake.%')
+        `);
+        if (oldFakeEmails.rows.length > 0) {
+          for (const row of oldFakeEmails.rows) {
+            const newEmail = gerarEmailAleatorio(row.name, row.id);
+            await pool.query('UPDATE users SET email = $1 WHERE id = $2', [newEmail, row.id]);
+          }
+          console.log(`   E-mails fake antigos atualizados: ${oldFakeEmails.rows.length} usuários.`);
+        }
 
         // 5b. Parcelas para usuários fake: apenas 2889 com 1-2 parcelas PAGAS; o restante tudo À VENCER
         const QUANTOS_COM_PAGAMENTO_PAGO = 2889;
@@ -752,6 +764,51 @@ Versão: 1.0`;
           }
           console.log(`✅ Parcelas criadas: ${usersComPago.length} usuários com 1-2 pagas; ${usersAVencer.length} usuários com parcelas à vencer.`);
         }
+      }
+    }
+
+    // 5c. Sempre que existir usuário fake: redistribuir created_at (2 meses) e corrigir e-mails antigos
+    const fakeCountCheck = await pool.query("SELECT COUNT(*) AS total FROM users WHERE fake = true");
+    if (parseInt(fakeCountCheck.rows[0].total, 10) > 0) {
+      await pool.query(`
+        UPDATE users SET created_at = NOW() - (random() * INTERVAL '60 days') WHERE fake = true
+      `);
+      console.log('   created_at dos fakes redistribuído nos últimos 2 meses (sempre ao rodar seed).');
+
+      const DOMINIOS_FIX = [
+        { d: 'gmail.com', p: 45 }, { d: 'hotmail.com', p: 15 }, { d: 'outlook.com', p: 8 },
+        { d: 'yahoo.com.br', p: 8 }, { d: 'uol.com.br', p: 8 }, { d: 'bol.com.br', p: 5 },
+        { d: 'live.com.br', p: 4 }, { d: 'ig.com.br', p: 3 }, { d: 'terra.com.br', p: 2 },
+        { d: 'globo.com', p: 2 },
+      ];
+      function escolherDominioFix() {
+        const total = DOMINIOS_FIX.reduce((s, x) => s + x.p, 0);
+        let r = Math.floor(Math.random() * total);
+        for (const { d, p } of DOMINIOS_FIX) {
+          if (r < p) return d;
+          r -= p;
+        }
+        return DOMINIOS_FIX[0].d;
+      }
+      function gerarEmailAleatorioFix(nome, sufixoUnico) {
+        const local = (nome || 'user').toString()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/\p{M}/gu, '')
+          .replace(/\s+/g, '.')
+          .replace(/[^a-z0-9.]/g, '')
+          .slice(0, 25) || 'user';
+        return `${local}${sufixoUnico}@${escolherDominioFix()}`;
+      }
+      const oldFakeEmailsCheck = await pool.query(`
+        SELECT id, name FROM users WHERE fake = true AND (email LIKE 'fake_%' OR email LIKE '%@fake.%')
+      `);
+      if (oldFakeEmailsCheck.rows.length > 0) {
+        for (const row of oldFakeEmailsCheck.rows) {
+          const newEmail = gerarEmailAleatorioFix(row.name, row.id);
+          await pool.query('UPDATE users SET email = $1 WHERE id = $2', [newEmail, row.id]);
+        }
+        console.log(`   E-mails fake antigos atualizados: ${oldFakeEmailsCheck.rows.length} usuários.`);
       }
     }
 

@@ -332,7 +332,7 @@ const AssociationUsers = () => {
                             <p className="text-lg font-bold text-red-600">{user.overdue_payments}</p>
                           </div>
                           <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-lg">
-                            <p className="text-xs text-muted-foreground mb-1">Total (240 meses)</p>
+                            <p className="text-xs text-muted-foreground mb-1">Total</p>
                             <p className="text-lg font-bold text-blue-600">{TOTAL_PARCELAS_MESES}</p>
                           </div>
                         </div>
