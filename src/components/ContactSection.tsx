@@ -209,12 +209,12 @@ export const ContactSection = () => {
     {
       icon: Phone,
       label: "Telefone",
-      value: "(11) 99999-9999",
+      value: "(11) 93455-6788",
     },
     {
       icon: Mail,
       label: "E-mail",
-      value: "contato@larparatodos.org.br",
+      value: "Larparatodos@larparaatodoshabitacional.com.br",
     },
     {
       icon: MapPin,
@@ -296,7 +296,7 @@ export const ContactSection = () => {
               <Button
                 size="lg"
                 className="bg-[#25D366] hover:bg-[#20BD5A] text-white font-semibold text-base px-6 py-5"
-                onClick={() => window.open("https://wa.me/5511999999999", "_blank")}
+                onClick={() => window.open("https://wa.me/5511934556788", "_blank")}
               >
                 <MessageCircle className="w-5 h-5 mr-2" />
                 Falar pelo WhatsApp

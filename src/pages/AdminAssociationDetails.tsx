@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { adminApi, Association, AdminUser } from '@/lib/api';
+import { adminApi, Association, AdminUser, TOTAL_PARCELAS_MESES } from '@/lib/api';
 import { AdminLayout } from '@/components/AdminLayout';
 
 const AdminAssociationDetails = () => {
@@ -221,7 +221,7 @@ const AdminAssociationDetails = () => {
                 {metrics?.payments?.paid ?? (association.paid_payments ? parseInt(String(association.paid_payments)) : 0)}
               </div>
               <p className="text-xs text-muted-foreground">
-                de {metrics?.payments?.total ?? (association.total_payments ? parseInt(String(association.total_payments)) : 0)} total
+                parcelas pagas (240 meses por cooperado)
               </p>
             </CardContent>
           </Card>
@@ -345,24 +345,23 @@ const AdminAssociationDetails = () => {
                           )}
                           {user.is_admin && <Badge className="bg-purple-500">Admin</Badge>}
                         </div>
-                        <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Mail className="w-3 h-3" />
-                            {user.email}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-sm text-muted-foreground">
+                          <span className="flex items-center gap-1 min-w-0 max-w-full">
+                            <Mail className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate" title={user.email}>{user.email}</span>
                           </span>
                           {user.phone && (
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3" />
-                              {user.phone}
+                            <span className="flex items-center gap-1 min-w-0">
+                              <Phone className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate">{user.phone}</span>
                             </span>
                           )}
                           {user.cpf && (
-                            <span>CPF: {user.cpf}</span>
+                            <span className="min-w-0 truncate font-mono">CPF: {user.cpf}</span>
                           )}
                         </div>
                         <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                          <span>Pagamentos: {user.total_payments || 0}</span>
-                          <span>Pagos: {user.paid_payments || 0}</span>
+                          <span>Parcelas: {user.paid_payments || 0}/{TOTAL_PARCELAS_MESES} (240 meses)</span>
                           <span>Total pago: {formatCurrency(parseFloat(user.total_paid) || 0)}</span>
                         </div>
                       </div>

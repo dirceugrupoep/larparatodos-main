@@ -580,6 +580,39 @@ Versão: 1.0`;
         }
         records = records.slice(0, toInsert);
 
+        // E-mails aleatórios com domínios reais (sem palavra "fake"); Gmail em maior peso
+        const DOMINIOS = [
+          { d: 'gmail.com', p: 45 },
+          { d: 'hotmail.com', p: 15 },
+          { d: 'outlook.com', p: 8 },
+          { d: 'yahoo.com.br', p: 8 },
+          { d: 'uol.com.br', p: 8 },
+          { d: 'bol.com.br', p: 5 },
+          { d: 'live.com.br', p: 4 },
+          { d: 'ig.com.br', p: 3 },
+          { d: 'terra.com.br', p: 2 },
+          { d: 'globo.com', p: 2 },
+        ];
+        function escolherDominio() {
+          const total = DOMINIOS.reduce((s, x) => s + x.p, 0);
+          let r = Math.floor(Math.random() * total);
+          for (const { d, p } of DOMINIOS) {
+            if (r < p) return d;
+            r -= p;
+          }
+          return DOMINIOS[0].d;
+        }
+        function gerarEmailAleatorio(nome, sufixoUnico) {
+          const local = nome
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/\p{M}/gu, '')
+            .replace(/\s+/g, '.')
+            .replace(/[^a-z0-9.]/g, '')
+            .slice(0, 25) || 'user';
+          return `${local}${sufixoUnico}@${escolherDominio()}`;
+        }
+
         const fakePasswordHash = await bcrypt.hash('fake123', 10);
         const BATCH = 1000;
         let inserted = 0;
@@ -596,7 +629,7 @@ Versão: 1.0`;
             const r = records[batchStart + i];
             const globalIndex = currentFake + batchStart + i + 1;
             names.push(r.name);
-            emails.push(`fake_${globalIndex}@fake.larparatodos.local`);
+            emails.push(gerarEmailAleatorio(r.name, globalIndex));
             assocIds.push(associationIds[Math.floor(Math.random() * associationIds.length)]);
             paymentDays.push(r.payment_day);
             cpfs.push(r.cpf);

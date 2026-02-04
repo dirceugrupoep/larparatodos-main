@@ -23,10 +23,10 @@ const rules = [
   {
     icon: Calendar,
     title: "Prazo de Contemplação",
-    highlight: "24 meses",
+    highlight: "240 meses",
     color: "from-secondary to-secondary/80",
     items: [
-      "24 meses após liberação do seu projeto",
+      "240 parcelas (240 meses) após liberação do seu projeto",
       "Sem burocracia e financiamento pronto",
       "Acompanhamento em tempo real",
     ],

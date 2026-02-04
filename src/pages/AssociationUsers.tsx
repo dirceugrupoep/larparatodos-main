@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { associationDashboardApi, AssociationUser } from '@/lib/api';
+import { associationDashboardApi, AssociationUser, TOTAL_PARCELAS_MESES } from '@/lib/api';
 import { AssociationLayout } from '@/components/AssociationLayout';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -320,8 +320,8 @@ const AssociationUsers = () => {
                       <div className="flex flex-col gap-2 md:min-w-[200px]">
                         <div className="grid grid-cols-2 gap-2">
                           <div className="bg-green-50 dark:bg-green-950/20 p-3 rounded-lg">
-                            <p className="text-xs text-muted-foreground mb-1">Pagos</p>
-                            <p className="text-lg font-bold text-green-600">{user.paid_payments}</p>
+                            <p className="text-xs text-muted-foreground mb-1">Parcelas pagas</p>
+                            <p className="text-lg font-bold text-green-600">{user.paid_payments}/{TOTAL_PARCELAS_MESES}</p>
                           </div>
                           <div className="bg-yellow-50 dark:bg-yellow-950/20 p-3 rounded-lg">
                             <p className="text-xs text-muted-foreground mb-1">Pendentes</p>
@@ -332,8 +332,8 @@ const AssociationUsers = () => {
                             <p className="text-lg font-bold text-red-600">{user.overdue_payments}</p>
                           </div>
                           <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-lg">
-                            <p className="text-xs text-muted-foreground mb-1">Total</p>
-                            <p className="text-lg font-bold text-blue-600">{user.total_payments}</p>
+                            <p className="text-xs text-muted-foreground mb-1">Total (240 meses)</p>
+                            <p className="text-lg font-bold text-blue-600">{TOTAL_PARCELAS_MESES}</p>
                           </div>
                         </div>
                         {user.pending_amount > 0 && (

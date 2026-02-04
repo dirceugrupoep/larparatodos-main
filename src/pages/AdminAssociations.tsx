@@ -527,16 +527,14 @@ const AdminAssociationsPage = () => {
                       <div className="flex items-center justify-between mb-2">
                         <CheckCircle2 className="w-5 h-5 text-blue-600" />
                       </div>
-                      <p className="text-xs text-muted-foreground mb-1">Pagamentos</p>
+                      <p className="text-xs text-muted-foreground mb-1">Parcelas pagas</p>
                       <p className="text-2xl font-bold text-foreground mb-1">
                         {typeof association.paid_payments === 'string'
                           ? parseInt(association.paid_payments)
                           : (association.paid_payments || 0)}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        de {typeof association.total_payments === 'string'
-                          ? parseInt(association.total_payments)
-                          : (association.total_payments || 0)} total
+                        240 meses por cooperado
                       </p>
                     </div>
 

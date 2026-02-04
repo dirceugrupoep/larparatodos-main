@@ -1,5 +1,8 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+/** Total de parcelas/meses do contrato (todos os cooperados têm 240 parcelas) */
+export const TOTAL_PARCELAS_MESES = 240;
+
 export interface User {
   id: number;
   name: string;

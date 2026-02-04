@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { adminApi, AdminUser } from '@/lib/api';
+import { adminApi, AdminUser, TOTAL_PARCELAS_MESES } from '@/lib/api';
 import { AdminLayout } from '@/components/AdminLayout';
 
 const AdminUsersPage = () => {
@@ -261,38 +261,39 @@ const AdminUsersPage = () => {
                             )}
                           </div>
 
-                          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Mail className="w-4 h-4" />
-                              {user.email}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-3 text-sm">
+                            <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                              <Mail className="w-4 h-4 flex-shrink-0" />
+                              <span className="truncate" title={user.email}>{user.email}</span>
                             </div>
                             {user.phone && (
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                <Phone className="w-4 h-4" />
-                                {user.phone}
+                              <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                                <Phone className="w-4 h-4 flex-shrink-0" />
+                                <span className="truncate">{user.phone}</span>
                               </div>
                             )}
                             {user.cpf && (
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                CPF: {user.cpf}
+                              <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                                <span className="font-medium text-muted-foreground/80">CPF:</span>
+                                <span className="truncate font-mono">{user.cpf}</span>
                               </div>
                             )}
                             {user.city && (
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                <MapPin className="w-4 h-4" />
-                                {user.city}, {user.state}
+                              <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                                <MapPin className="w-4 h-4 flex-shrink-0" />
+                                <span className="truncate">{user.city}, {user.state}</span>
                               </div>
                             )}
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Calendar className="w-4 h-4" />
+                            <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                              <Calendar className="w-4 h-4 flex-shrink-0" />
                               {formatDate(user.created_at)}
                             </div>
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <DollarSign className="w-4 h-4" />
+                            <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                              <DollarSign className="w-4 h-4 flex-shrink-0" />
                               Total pago: {formatCurrency(parseFloat(user.total_paid || '0'))}
                             </div>
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              Pagamentos: {user.paid_payments}/{user.total_payments}
+                            <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                              Parcelas: {user.paid_payments}/{TOTAL_PARCELAS_MESES} (240 meses)
                             </div>
                           </div>
                         </div>

@@ -195,9 +195,9 @@ router.get('/dashboard', async (req, res) => {
         total: revTotal,
       },
       contacts: {
-        total: parseInt(totalContacts.rows[0].count),
-        today: parseInt(contactsToday.rows[0].count),
-        thisMonth: parseInt(contactsThisMonth.rows[0].count),
+        total: isFakeAdmin(req) ? 0 : parseInt(totalContacts.rows[0].count),
+        today: isFakeAdmin(req) ? 0 : parseInt(contactsToday.rows[0].count),
+        thisMonth: isFakeAdmin(req) ? 0 : parseInt(contactsThisMonth.rows[0].count),
       },
       trends: {
         paymentsByMonth: paymentsByMonth.rows,

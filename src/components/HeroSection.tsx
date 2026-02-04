@@ -37,7 +37,7 @@ const slides = [
       type: "steps",
       items: [
         { icon: Wallet, text: "Pague mensalidades entre dia 5 útil e dia 20" },
-        { icon: Clock, text: "24 meses após liberação do seu projeto" },
+        { icon: Clock, text: "240 parcelas (240 meses) após liberação do seu projeto" },
         { icon: Home, text: "Receba sua casa pronta" },
       ],
     },
