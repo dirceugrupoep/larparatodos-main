@@ -151,8 +151,6 @@ router.get('/dashboard', async (req, res) => {
     ]);
 
     // Projeções e tendências (pagamentos no escopo; para fake admin não somamos real para não duplicar gráficos)
-    const userScopeTable = userScopeConditionTable(req);
-    const userWhereTrend = ` AND ${userScopeTable}`;
     const [
       avgPaymentValue,
       paymentsByMonth,
@@ -178,7 +176,7 @@ router.get('/dashboard', async (req, res) => {
         regs AS (
           SELECT DATE(created_at) AS d, COUNT(*) AS c
           FROM users
-          WHERE is_admin = false ${userWhereTrend}
+          WHERE is_admin = false ${userWhere}
             AND created_at >= CURRENT_DATE - INTERVAL '90 days'
           GROUP BY DATE(created_at)
         )
