@@ -103,6 +103,26 @@ const AdminDashboardPage = () => {
     pagamentos: parseInt(item.count || 0),
   }));
 
+  const formatDay = (dateStr: string) => {
+    if (!dateStr) return '';
+    const s = String(dateStr).slice(0, 10);
+    const [y, m, d] = s.split('-');
+    return d && m ? `${d}/${m}` : s;
+  };
+
+  const registrationsByDayData = (data.trends?.registrationsByDay || []).map((item: any) => ({
+    date: formatDay(item.date),
+    fullDate: item.date,
+    cadastros: parseInt(item.count || 0, 10),
+  }));
+
+  const revenueByDayData = (data.trends?.revenueByDay || []).map((item: any) => ({
+    date: formatDay(item.date),
+    fullDate: item.date,
+    receita: parseFloat(item.total || 0),
+    parcelas: parseInt(item.count || 0, 10),
+  }));
+
   const pieData = [
     { name: 'Pagos', value: data.payments.paid, color: '#22c55e' },
     { name: 'Pendentes', value: data.payments.pending, color: '#eab308' },
@@ -599,6 +619,116 @@ const AdminDashboardPage = () => {
                     />
                     <Bar dataKey="pagamentos" fill="hsl(var(--secondary))" radius={[8, 8, 0, 0]} />
                   </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+
+        {/* Gráficos de linha por dia (estilo evolução / crypto) */}
+        <div className="grid lg:grid-cols-2 gap-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 2.05 }}
+          >
+            <Card className="border-2 border-primary/20 hover:border-primary/40 transition-all overflow-hidden">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Users className="w-5 h-5 text-primary" />
+                  Evolução de cadastros por dia
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Últimos 90 dias — novo cadastro por dia</p>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={registrationsByDayData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="colorCadastros" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" className="opacity-20" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 10 }}
+                      interval="preserveStartEnd"
+                      minTickGap={40}
+                    />
+                    <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.fullDate && formatDay(payload[0].payload.fullDate)}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="cadastros"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      fill="url(#colorCadastros)"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 2.1 }}
+          >
+            <Card className="border-2 border-emerald-500/20 hover:border-emerald-500/40 transition-all overflow-hidden">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <DollarSign className="w-5 h-5 text-emerald-600" />
+                  Evolução de receita por dia
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Últimos 90 dias — valor pago por dia</p>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={revenueByDayData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="colorReceitaDia" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" className="opacity-20" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 10 }}
+                      interval="preserveStartEnd"
+                      minTickGap={40}
+                    />
+                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `R$${v}`} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number) => [formatCurrency(value), 'Receita']}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.fullDate && formatDay(payload[0].payload.fullDate)}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="receita"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      fill="url(#colorReceitaDia)"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  </LineChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>

@@ -151,10 +151,14 @@ router.get('/dashboard', async (req, res) => {
     ]);
 
     // Projeções e tendências (pagamentos no escopo; para fake admin não somamos real para não duplicar gráficos)
+    const userScopeTable = userScopeConditionTable(req);
+    const userWhereTrend = ` AND ${userScopeTable}`;
     const [
       avgPaymentValue,
       paymentsByMonth,
       revenueByMonth,
+      registrationsByDay,
+      revenueByDay,
     ] = await Promise.all([
       pool.query(`SELECT COALESCE(AVG(p.amount), 0) as avg ${payScope} AND p.status = 'paid'`),
       pool.query(`
@@ -166,6 +170,33 @@ router.get('/dashboard', async (req, res) => {
         SELECT TO_CHAR(p.paid_date, 'YYYY-MM') as month, COALESCE(SUM(p.amount), 0) as total
         ${payScope} AND p.status = 'paid' AND p.paid_date >= CURRENT_DATE - INTERVAL '12 months'
         GROUP BY TO_CHAR(p.paid_date, 'YYYY-MM') ORDER BY month DESC LIMIT 12
+      `),
+      pool.query(`
+        WITH days AS (
+          SELECT generate_series(CURRENT_DATE - INTERVAL '90 days', CURRENT_DATE, '1 day')::date AS d
+        ),
+        regs AS (
+          SELECT DATE(created_at) AS d, COUNT(*) AS c
+          FROM users
+          WHERE is_admin = false ${userWhereTrend}
+            AND created_at >= CURRENT_DATE - INTERVAL '90 days'
+          GROUP BY DATE(created_at)
+        )
+        SELECT days.d::text AS date, COALESCE(regs.c, 0)::int AS count
+        FROM days LEFT JOIN regs ON days.d = regs.d ORDER BY days.d
+      `),
+      pool.query(`
+        WITH days AS (
+          SELECT generate_series(CURRENT_DATE - INTERVAL '90 days', CURRENT_DATE, '1 day')::date AS d
+        ),
+        rev AS (
+          SELECT DATE(p.paid_date) AS d, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS cnt
+          ${payScope} AND p.status = 'paid' AND p.paid_date IS NOT NULL
+            AND p.paid_date >= CURRENT_DATE - INTERVAL '90 days'
+          GROUP BY DATE(p.paid_date)
+        )
+        SELECT days.d::text AS date, COALESCE(rev.total, 0) AS total, COALESCE(rev.cnt, 0)::int AS count
+        FROM days LEFT JOIN rev ON days.d = rev.d ORDER BY days.d
       `),
     ]);
 
@@ -202,6 +233,8 @@ router.get('/dashboard', async (req, res) => {
       trends: {
         paymentsByMonth: paymentsByMonth.rows,
         revenueByMonth: revenueByMonth.rows,
+        registrationsByDay: registrationsByDay.rows,
+        revenueByDay: revenueByDay.rows,
       },
     });
   } catch (error) {
@@ -455,25 +488,45 @@ router.post('/users/:id/toggle-active', async (req, res) => {
 
 // ==================== RELATÓRIOS ====================
 
-// Relatório de pagamentos
+// Relatório de pagamentos (filtros: associação, status)
 router.get('/reports/payments', async (req, res) => {
   try {
     const startDate = req.query.startDate || new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
     const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+    const associationId = req.query.associationId ? parseInt(req.query.associationId, 10) : null;
+    const status = req.query.status || 'all'; // all | paid | pending | overdue
     const scopeWhere = ` AND ${userScopeCondition(req)}`;
 
+    const conditions = ['DATE(p.created_at) BETWEEN $1 AND $2', scopeWhere.replace(/^ AND /, '')];
+    const params = [startDate, endDate];
+
+    if (associationId) {
+      conditions.push(`u.association_id = $${params.length + 1}`);
+      params.push(associationId);
+    }
+    if (status === 'paid') {
+      conditions.push("p.status = 'paid'");
+    } else if (status === 'pending') {
+      conditions.push("p.status = 'pending' AND p.due_date >= CURRENT_DATE");
+    } else if (status === 'overdue') {
+      conditions.push("p.status = 'pending' AND p.due_date < CURRENT_DATE");
+    }
+
+    const whereClause = conditions.join(' AND ');
     const result = await pool.query(
       `SELECT 
         p.*,
         u.name as user_name,
         u.email as user_email,
-        up.cpf as user_cpf
+        up.cpf as user_cpf,
+        a.trade_name as association_name
       FROM payments p
       JOIN users u ON p.user_id = u.id
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      WHERE DATE(p.created_at) BETWEEN $1 AND $2 ${scopeWhere}
+      LEFT JOIN associations a ON u.association_id = a.id
+      WHERE ${whereClause}
       ORDER BY p.created_at DESC`,
-      [startDate, endDate]
+      params
     );
 
     res.json({ payments: result.rows });
@@ -483,10 +536,165 @@ router.get('/reports/payments', async (req, res) => {
   }
 });
 
-// Relatório de inadimplência (escopo fake/não-fake)
+// Relatório analítico (DRE, faturamento do mês, resumo gerencial)
+router.get('/reports/analytics', async (req, res) => {
+  try {
+    const startDate = req.query.startDate || new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
+    const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+    const associationId = req.query.associationId ? parseInt(req.query.associationId, 10) : null;
+    const scopeCond = userScopeCondition(req);
+    const params = [startDate, endDate];
+    let assocFilter = '';
+    if (associationId) {
+      assocFilter = ` AND u.association_id = $${params.length + 1}`;
+      params.push(associationId);
+    }
+
+    const baseFrom = `FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE ${scopeCond} AND DATE(p.created_at) BETWEEN $1 AND $2${assocFilter}`;
+    const baseFromAll = `FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE ${scopeCond}${associationId ? ' AND u.association_id = $1' : ''}`;
+    const paramsAll = associationId ? [associationId] : [];
+
+    const [
+      receitaPeriodo,
+      parcelasPendentes,
+      parcelasAtrasadas,
+      totalReceitaHistorico,
+      inadimplenciaTotal,
+      cooperadosPagantes,
+      cooperadosInadimplentes,
+    ] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${baseFrom} AND p.status = 'paid'`, params),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(p.amount), 0) as total ${baseFrom} AND p.status = 'pending' AND p.due_date >= CURRENT_DATE`, params),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(p.amount), 0) as total ${baseFrom} AND p.status = 'pending' AND p.due_date < CURRENT_DATE`, params),
+      pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${baseFromAll} AND p.status = 'paid'`, paramsAll),
+      pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${baseFromAll} AND p.status = 'pending' AND p.due_date < CURRENT_DATE`, paramsAll),
+      pool.query(`SELECT COUNT(DISTINCT p.user_id) as count ${baseFromAll} AND p.status = 'paid'`, paramsAll),
+      pool.query(
+        `SELECT COUNT(DISTINCT p.user_id) as count ${baseFromAll} AND p.user_id IN (SELECT p2.user_id FROM payments p2 INNER JOIN users u2 ON p2.user_id = u2.id WHERE p2.status = 'pending' AND p2.due_date < CURRENT_DATE AND ${scopeCond.replace('u.', 'u2.')}${associationId ? ' AND u2.association_id = $1' : ''})`,
+        paramsAll
+      ),
+    ]);
+
+    const parcelasPagas = await pool.query(`SELECT COUNT(*) as count ${baseFrom} AND p.status = 'paid'`, params);
+
+    const paramsFaturamento = associationId ? [associationId] : [];
+    const faturamentoPorMesQuery = associationId
+      ? `SELECT TO_CHAR(p.paid_date, 'YYYY-MM') as mes_ano, SUM(p.amount) as valor, COUNT(p.id) as quantidade
+         FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE p.status = 'paid' AND u.association_id = $1 AND ${scopeCond}
+         GROUP BY TO_CHAR(p.paid_date, 'YYYY-MM') ORDER BY mes_ano DESC LIMIT 12`
+      : `SELECT TO_CHAR(p.paid_date, 'YYYY-MM') as mes_ano, SUM(p.amount) as valor, COUNT(p.id) as quantidade
+         FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE p.status = 'paid' AND ${scopeCond}
+         GROUP BY TO_CHAR(p.paid_date, 'YYYY-MM') ORDER BY mes_ano DESC LIMIT 12`;
+    const faturamentoPorMes = await pool.query(faturamentoPorMesQuery, paramsFaturamento.length ? paramsFaturamento : []);
+
+    const dre = {
+      receitaOperacional: parseFloat(receitaPeriodo.rows[0]?.total || 0),
+      parcelasPagasPeriodo: parseInt(parcelasPagas.rows[0]?.count || 0),
+      parcelasPendentes: parseInt(parcelasPendentes.rows[0]?.count || 0),
+      valorPendente: parseFloat(parcelasPendentes.rows[0]?.total || 0),
+      parcelasAtrasadas: parseInt(parcelasAtrasadas.rows[0]?.count || 0),
+      valorAtrasado: parseFloat(parcelasAtrasadas.rows[0]?.total || 0),
+      totalReceitaAcumulada: parseFloat(totalReceitaHistorico.rows[0]?.total || 0),
+      inadimplenciaTotal: parseFloat(inadimplenciaTotal.rows[0]?.total || 0),
+      cooperadosPagantes: parseInt(cooperadosPagantes.rows[0]?.count || 0),
+      cooperadosInadimplentes: parseInt(cooperadosInadimplentes.rows[0]?.count || 0),
+    };
+
+    const faturamentoMeses = faturamentoPorMes.rows.map((r) => ({
+      mesAno: r.mes_ano,
+      valor: parseFloat(r.valor),
+      quantidade: parseInt(r.quantidade),
+    }));
+
+    res.json({
+      dre,
+      faturamentoPorMes: faturamentoMeses,
+      periodo: { startDate, endDate },
+      associationId: associationId || null,
+    });
+  } catch (error) {
+    console.error('Reports analytics error:', error);
+    res.status(500).json({ error: 'Erro ao gerar relatório analítico' });
+  }
+});
+
+// Relatório de previsão: projeta receita e cadastros para os próximos X meses (média dos últimos 90 dias)
+router.get('/reports/forecast', async (req, res) => {
+  try {
+    const months = Math.min(24, Math.max(1, parseInt(req.query.months, 10) || 6));
+    const scopeCond = userScopeCondition(req);
+    const userScopeTable = userScopeConditionTable(req);
+    const payScope = ` FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE ${scopeCond}`;
+
+    const [dailyRevenue, dailyRegistrations] = await Promise.all([
+      pool.query(`
+        SELECT COALESCE(SUM(p.amount), 0) AS total, COUNT(DISTINCT DATE(p.paid_date)) AS days_with_data
+        ${payScope} AND p.status = 'paid' AND p.paid_date IS NOT NULL
+          AND p.paid_date >= CURRENT_DATE - INTERVAL '90 days'
+      `),
+      pool.query(`
+        SELECT COUNT(*) AS total
+        FROM users
+        WHERE is_admin = false AND ${userScopeTable}
+          AND created_at >= CURRENT_DATE - INTERVAL '90 days'
+      `),
+    ]);
+
+    const totalRevenue90 = parseFloat(dailyRevenue.rows[0]?.total || 0);
+    const daysWithRevenue = parseInt(dailyRevenue.rows[0]?.days_with_data || 0, 10);
+    const avgDailyRevenue = daysWithRevenue > 0 ? totalRevenue90 / 90 : 0;
+    const totalRegs90 = parseInt(dailyRegistrations.rows[0]?.total || 0, 10);
+    const avgDailyRegistrations = totalRegs90 / 90;
+
+    const byMonth = [];
+    let totalPredictedRevenue = 0;
+    let totalPredictedRegistrations = 0;
+    const now = new Date();
+    for (let i = 1; i <= months; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = d.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+      const predRevenue = Math.round(avgDailyRevenue * daysInMonth * 100) / 100;
+      const predRegs = Math.round(avgDailyRegistrations * daysInMonth);
+      byMonth.push({
+        month: monthKey,
+        monthLabel,
+        daysInMonth,
+        predictedRevenue: predRevenue,
+        predictedRegistrations: predRegs,
+      });
+      totalPredictedRevenue += predRevenue;
+      totalPredictedRegistrations += predRegs;
+    }
+
+    res.json({
+      projectionMonths: months,
+      basedOnDays: 90,
+      avgDailyRevenue,
+      avgDailyRegistrations,
+      byMonth,
+      totalPredictedRevenue,
+      totalPredictedRegistrations,
+    });
+  } catch (error) {
+    console.error('Forecast report error:', error);
+    res.status(500).json({ error: 'Erro ao gerar previsão' });
+  }
+});
+
+// Relatório de inadimplência (escopo fake/não-fake; filtro por associação)
 router.get('/reports/overdue', async (req, res) => {
   try {
+    const associationId = req.query.associationId ? parseInt(req.query.associationId, 10) : null;
     const scopeWhere = ` AND ${userScopeCondition(req)}`;
+    const params = [];
+    let assocWhere = '';
+    if (associationId) {
+      assocWhere = ` AND u.association_id = $1`;
+      params.push(associationId);
+    }
+
     const result = await pool.query(
       `SELECT 
         u.id,
@@ -494,14 +702,17 @@ router.get('/reports/overdue', async (req, res) => {
         u.email,
         u.phone,
         up.cpf,
+        a.trade_name as association_name,
         COUNT(p.id) as overdue_count,
         COALESCE(SUM(p.amount), 0) as total_overdue
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
+      LEFT JOIN associations a ON u.association_id = a.id
       INNER JOIN payments p ON u.id = p.user_id
-      WHERE p.status = 'pending' AND p.due_date < CURRENT_DATE ${scopeWhere}
-      GROUP BY u.id, u.name, u.email, u.phone, up.cpf
-      ORDER BY total_overdue DESC`
+      WHERE p.status = 'pending' AND p.due_date < CURRENT_DATE ${scopeWhere}${assocWhere}
+      GROUP BY u.id, u.name, u.email, u.phone, up.cpf, a.trade_name
+      ORDER BY total_overdue DESC`,
+      params
     );
 
     res.json({ overdueUsers: result.rows });

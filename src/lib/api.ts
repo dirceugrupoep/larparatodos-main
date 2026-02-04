@@ -625,6 +625,8 @@ export interface AdminDashboard {
   trends: {
     paymentsByMonth: any[];
     revenueByMonth: any[];
+    registrationsByDay: Array<{ date: string; count: number }>;
+    revenueByDay: Array<{ date: string; total: number; count: number }>;
   };
 }
 
@@ -771,13 +773,20 @@ export const adminApi = {
     return response.json();
   },
 
-  async getPaymentsReport(startDate?: string, endDate?: string) {
+  async getPaymentsReport(params?: {
+    startDate?: string;
+    endDate?: string;
+    associationId?: number | null;
+    status?: 'all' | 'paid' | 'pending' | 'overdue';
+  }) {
     const token = localStorage.getItem('token');
     if (!token) throw new Error('Não autenticado');
 
     const queryParams = new URLSearchParams();
-    if (startDate) queryParams.append('startDate', startDate);
-    if (endDate) queryParams.append('endDate', endDate);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    if (params?.associationId != null && params.associationId !== '') queryParams.append('associationId', String(params.associationId));
+    if (params?.status && params.status !== 'all') queryParams.append('status', params.status);
 
     const response = await fetch(`${API_URL}/api/admin/reports/payments?${queryParams}`, {
       headers: {
@@ -792,11 +801,50 @@ export const adminApi = {
     return response.json();
   },
 
-  async getOverdueReport() {
+  async getReportsAnalytics(params?: {
+    startDate?: string;
+    endDate?: string;
+    associationId?: number | null;
+  }) {
     const token = localStorage.getItem('token');
     if (!token) throw new Error('Não autenticado');
 
-    const response = await fetch(`${API_URL}/api/admin/reports/overdue`, {
+    const queryParams = new URLSearchParams();
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    if (params?.associationId != null && params.associationId !== '') queryParams.append('associationId', String(params.associationId));
+
+    const response = await fetch(`${API_URL}/api/admin/reports/analytics?${queryParams}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Erro ao gerar relatório analítico');
+    }
+
+    return response.json();
+  },
+
+  async getForecastReport(months: number) {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+    const response = await fetch(`${API_URL}/api/admin/reports/forecast?months=${encodeURIComponent(months)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error('Erro ao gerar previsão');
+    return response.json();
+  },
+
+  async getOverdueReport(associationId?: number | null) {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+
+    const queryParams = new URLSearchParams();
+    if (associationId != null && associationId !== '') queryParams.append('associationId', String(associationId));
+
+    const response = await fetch(`${API_URL}/api/admin/reports/overdue?${queryParams}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
