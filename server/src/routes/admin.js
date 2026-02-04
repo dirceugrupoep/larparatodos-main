@@ -17,13 +17,16 @@ function userScopeCondition(req) {
 function userScopeConditionTable(req) {
   return isFakeAdmin(req) ? 'fake = true' : '(fake = false OR fake IS NULL)';
 }
+// Escopo "real" (não-fake) para somar aos totais do admin fake e dar número quebrado
+const REAL_SCOPE = '(u.fake = false OR u.fake IS NULL)';
+const REAL_SCOPE_TABLE = '(fake = false OR fake IS NULL)';
 
 // Todas as rotas requerem admin
 router.use(requireAdmin);
 
 // ==================== DASHBOARD E MÉTRICAS ====================
 
-// Dashboard geral com todas as métricas (escopo: admin fake vê só fake, outros vêem só não-fake)
+// Dashboard geral: admin normal vê só não-fake; admin fake vê só fake nas listas, mas totais = fake + real (número quebrado)
 router.get('/dashboard', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -32,7 +35,7 @@ router.get('/dashboard', async (req, res) => {
     const userScopeTable = userScopeConditionTable(req);
     const userWhere = ` AND ${userScopeTable}`;
 
-    // Métricas de usuários (exclui admins; escopo fake/não-fake)
+    // Métricas de usuários (exclui admins; escopo fake ou não-fake)
     const [
       totalUsers,
       activeUsers,
@@ -50,7 +53,7 @@ router.get('/dashboard', async (req, res) => {
     ]);
 
     const payScope = ` FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE ${userScope}`;
-    // Métricas de pagamentos (apenas de usuários no escopo)
+    // Métricas de pagamentos (escopo atual)
     const [
       totalPayments,
       paidPayments,
@@ -85,6 +88,57 @@ router.get('/dashboard', async (req, res) => {
       `),
     ]);
 
+    // Admin fake: somar cadastros reais aos totais para dar número quebrado (listagem continua só fake)
+    let usersTotal = parseInt(totalUsers.rows[0].count);
+    let usersActive = parseInt(activeUsers.rows[0].count);
+    let usersInactive = parseInt(inactiveUsers.rows[0].count);
+    let usersNewToday = parseInt(newUsersToday.rows[0].count);
+    let usersNewMonth = parseInt(newUsersThisMonth.rows[0].count);
+    let payTotal = parseInt(totalPayments.rows[0].count);
+    let payPaid = parseInt(paidPayments.rows[0].count);
+    let payPending = parseInt(pendingPayments.rows[0].count);
+    let payOverdue = parseInt(overduePayments.rows[0].count);
+    let revToday = parseFloat(revenueToday.rows[0].total);
+    let revMonth = parseFloat(revenueThisMonth.rows[0].total);
+    let revTotal = parseFloat(revenueTotal.rows[0].total);
+    let adimp = parseInt(adimplentes.rows[0].count);
+    let inadimp = parseInt(inadimplentes.rows[0].count);
+
+    if (isFakeAdmin(req)) {
+      const realWhere = ` AND ${REAL_SCOPE_TABLE}`;
+      const realPayScope = ` FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE ${REAL_SCOPE}`;
+      const [rU, rA, rI, rToday, rMonth, rPay, rPaid, rPending, rOverdue, rRevToday, rRevMonth, rRevTotal, rAdimp, rInadimp] = await Promise.all([
+        pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false ${realWhere}`),
+        pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND is_active = true ${realWhere}`),
+        pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND is_active = false ${realWhere}`),
+        pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND DATE(created_at) = $1 ${realWhere}`, [today]),
+        pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND DATE(created_at) >= $1 ${realWhere}`, [firstDayOfMonth]),
+        pool.query(`SELECT COUNT(*) as count ${realPayScope}`),
+        pool.query(`SELECT COUNT(*) as count ${realPayScope} AND p.status = 'paid'`),
+        pool.query(`SELECT COUNT(*) as count ${realPayScope} AND p.status = 'pending' AND p.due_date >= CURRENT_DATE`),
+        pool.query(`SELECT COUNT(*) as count ${realPayScope} AND p.status = 'pending' AND p.due_date < CURRENT_DATE`),
+        pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${realPayScope} AND p.status = 'paid' AND DATE(p.paid_date) = $1`, [today]),
+        pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${realPayScope} AND p.status = 'paid' AND DATE(p.paid_date) >= $1`, [firstDayOfMonth]),
+        pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${realPayScope} AND p.status = 'paid'`),
+        pool.query(`SELECT COUNT(DISTINCT p.user_id) as count ${realPayScope} AND p.user_id NOT IN (SELECT p2.user_id FROM payments p2 INNER JOIN users u2 ON p2.user_id = u2.id WHERE p2.status = 'pending' AND p2.due_date < CURRENT_DATE AND (u2.fake = false OR u2.fake IS NULL))`),
+        pool.query(`SELECT COUNT(DISTINCT p.user_id) as count ${realPayScope} AND p.user_id IN (SELECT p2.user_id FROM payments p2 INNER JOIN users u2 ON p2.user_id = u2.id WHERE p2.status = 'pending' AND p2.due_date < CURRENT_DATE AND (u2.fake = false OR u2.fake IS NULL))`),
+      ]);
+      usersTotal += parseInt(rU.rows[0].count);
+      usersActive += parseInt(rA.rows[0].count);
+      usersInactive += parseInt(rI.rows[0].count);
+      usersNewToday += parseInt(rToday.rows[0].count);
+      usersNewMonth += parseInt(rMonth.rows[0].count);
+      payTotal += parseInt(rPay.rows[0].count);
+      payPaid += parseInt(rPaid.rows[0].count);
+      payPending += parseInt(rPending.rows[0].count);
+      payOverdue += parseInt(rOverdue.rows[0].count);
+      revToday += parseFloat(rRevToday.rows[0].total);
+      revMonth += parseFloat(rRevMonth.rows[0].total);
+      revTotal += parseFloat(rRevTotal.rows[0].total);
+      adimp += parseInt(rAdimp.rows[0].count);
+      inadimp += parseInt(rInadimp.rows[0].count);
+    }
+
     // Métricas de contatos (globais para todos os admins)
     const [
       totalContacts,
@@ -96,7 +150,7 @@ router.get('/dashboard', async (req, res) => {
       pool.query("SELECT COUNT(*) as count FROM contacts WHERE DATE(created_at) >= $1", [firstDayOfMonth]),
     ]);
 
-    // Projeções e tendências (pagamentos no escopo)
+    // Projeções e tendências (pagamentos no escopo; para fake admin não somamos real para não duplicar gráficos)
     const [
       avgPaymentValue,
       paymentsByMonth,
@@ -115,28 +169,30 @@ router.get('/dashboard', async (req, res) => {
       `),
     ]);
 
+    const avgVal = payPaid > 0 ? revTotal / payPaid : parseFloat(avgPaymentValue.rows[0].avg);
+
     res.json({
       users: {
-        total: parseInt(totalUsers.rows[0].count),
-        active: parseInt(activeUsers.rows[0].count),
-        inactive: parseInt(inactiveUsers.rows[0].count),
-        newToday: parseInt(newUsersToday.rows[0].count),
-        newThisMonth: parseInt(newUsersThisMonth.rows[0].count),
+        total: usersTotal,
+        active: usersActive,
+        inactive: usersInactive,
+        newToday: usersNewToday,
+        newThisMonth: usersNewMonth,
         admins: parseInt(totalAdmins.rows[0].count),
       },
       payments: {
-        total: parseInt(totalPayments.rows[0].count),
-        paid: parseInt(paidPayments.rows[0].count),
-        pending: parseInt(pendingPayments.rows[0].count),
-        overdue: parseInt(overduePayments.rows[0].count),
-        adimplentes: parseInt(adimplentes.rows[0].count),
-        inadimplentes: parseInt(inadimplentes.rows[0].count),
-        avgValue: parseFloat(avgPaymentValue.rows[0].avg),
+        total: payTotal,
+        paid: payPaid,
+        pending: payPending,
+        overdue: payOverdue,
+        adimplentes: adimp,
+        inadimplentes: inadimp,
+        avgValue: avgVal,
       },
       revenue: {
-        today: parseFloat(revenueToday.rows[0].total),
-        thisMonth: parseFloat(revenueThisMonth.rows[0].total),
-        total: parseFloat(revenueTotal.rows[0].total),
+        today: revToday,
+        thisMonth: revMonth,
+        total: revTotal,
       },
       contacts: {
         total: parseInt(totalContacts.rows[0].count),

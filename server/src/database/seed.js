@@ -630,6 +630,14 @@ Versão: 1.0`;
         }
         console.log(`✅ Seed de usuários fake concluído: ${inserted} inseridos.`);
 
+        // 5a. Distribuir created_at dos usuários fake nos últimos 12 meses (para "Novos Hoje" / "Novos no Mês" não serem 26k)
+        await pool.query(`
+          UPDATE users
+          SET created_at = NOW() - (random() * INTERVAL '60 days')
+          WHERE fake = true
+        `);
+        console.log('   created_at dos fakes distribuído nos últimos 12 meses.');
+
         // 5b. Parcelas para usuários fake: apenas 2889 com 1-2 parcelas PAGAS; o restante tudo À VENCER
         const QUANTOS_COM_PAGAMENTO_PAGO = 2889;
         const fakeUserIds = await pool.query(`
@@ -651,19 +659,32 @@ Versão: 1.0`;
           const now = new Date();
           const paymentRows = [];
 
-          // 2889 usuários: 1 ou 2 parcelas PAGAS
+          // 2889 usuários: 1 ou 2 parcelas PAGAS (parte com paid_date no mês atual e hoje para Receita do Mês / Receita Hoje)
           for (const uid of usersComPago) {
             const numParcelas = Math.random() < 0.5 ? 1 : 2;
+            // Uma parcela por usuário pode ser "deste mês" (~25%) ou "de hoje" (~5%); o resto no passado
+            const parcelaMesAtual = numParcelas === 1 ? (Math.random() < 0.25) : (Math.random() < 0.15);
+            const parcelaHoje = Math.random() < 0.05;
             const baseMonth = 2 + Math.floor(Math.random() * 10);
             for (let p = 0; p < numParcelas; p++) {
               const dueDate = new Date(now.getFullYear(), now.getMonth() - baseMonth - p, 10);
-              const paidDate = new Date(dueDate);
-              paidDate.setDate(paidDate.getDate() + (Math.random() < 0.7 ? 0 : 1));
+              let paidDateStr;
+              if (p === 0 && parcelaHoje) {
+                paidDateStr = now.toISOString().split('T')[0];
+              } else if (p === 0 && parcelaMesAtual) {
+                const dia = 1 + Math.floor(Math.random() * Math.min(28, now.getDate()));
+                const paidDate = new Date(now.getFullYear(), now.getMonth(), dia);
+                paidDateStr = paidDate.toISOString().split('T')[0];
+              } else {
+                const paidDate = new Date(dueDate);
+                paidDate.setDate(paidDate.getDate() + (Math.random() < 0.7 ? 0 : 1));
+                paidDateStr = paidDate.toISOString().split('T')[0];
+              }
               paymentRows.push({
                 user_id: uid,
                 amount: 150,
                 due_date: dueDate.toISOString().split('T')[0],
-                paid_date: paidDate.toISOString().split('T')[0],
+                paid_date: paidDateStr,
                 status: 'paid'
               });
             }
