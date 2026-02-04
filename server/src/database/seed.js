@@ -1,5 +1,10 @@
 import { pool } from './connection.js';
 import bcrypt from 'bcryptjs';
+import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function seed() {
   try {
@@ -76,10 +81,7 @@ async function seed() {
 
     if (existingAdmin.rows.length > 0) {
       console.log('✅ Admin já existe, pulando criação');
-      process.exit(0);
-      return;
-    }
-
+    } else {
     // 3. Criar admin vinculado à associação padrão
     const hashedPassword = await bcrypt.hash('senha123', 10);
     
@@ -102,6 +104,25 @@ async function seed() {
     console.log(`   Senha: senha123`);
     console.log(`   ID: ${result.rows[0].id}`);
     console.log(`   Associação: ${defaultAssociation.corporate_name}`);
+    }
+
+    // 3b. Criar admin "fake" (vê apenas cadastros fake e balanço dos fakes)
+    const fakeAdminEmail = 'admin@larparatodoshabitacional.com.br';
+    const existingFakeAdmin = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [fakeAdminEmail]
+    );
+    if (existingFakeAdmin.rows.length === 0) {
+      const fakeAdminPassword = await bcrypt.hash('admin123456789', 10);
+      await pool.query(
+        `INSERT INTO users (name, email, password, is_admin, is_active, association_id, fake)
+         VALUES ($1, $2, $3, true, true, $4, false)`,
+        ['Admin Larparatodos', fakeAdminEmail, fakeAdminPassword, defaultAssociation.id]
+      );
+      console.log('✅ Admin fake criado: ' + fakeAdminEmail + ' / Senha: admin123456789');
+    } else {
+      console.log('✅ Admin fake já existe');
+    }
 
     // 4. Criar termo de aceite padrão
     const existingTerm = await pool.query(
@@ -488,6 +509,166 @@ Versão: 1.0`;
       console.log('✅ Termo de aceite criado!');
     } else {
       console.log('✅ Termo de aceite já existe');
+    }
+
+    // 5. Seed de usuários fake (26.000) — roda apenas uma vez (idempotente)
+    const FAKE_TARGET = 26000;
+    const countFake = await pool.query(
+      "SELECT COUNT(*) AS total FROM users WHERE fake = true"
+    );
+    const currentFake = parseInt(countFake.rows[0].total, 10);
+
+    if (currentFake >= FAKE_TARGET) {
+      console.log(`✅ Já existem ${currentFake} usuários fake (meta: ${FAKE_TARGET}), pulando seed de fakes.`);
+    } else {
+      const assocResult = await pool.query('SELECT id FROM associations WHERE is_active = true');
+      const associationIds = assocResult.rows.map((r) => r.id);
+      if (associationIds.length === 0) {
+        console.log('⚠️ Nenhuma associação ativa; seed de fakes ignorado.');
+      } else {
+        const toInsert = FAKE_TARGET - currentFake;
+        console.log(`🌱 Inserindo ${toInsert} usuários fake (${currentFake} já existentes)...`);
+
+        // Carrega dump pré-gerado se existir (mais rápido e automatizado)
+        const dumpPath = join(__dirname, 'seed-fake-users.json');
+        let records = [];
+        if (existsSync(dumpPath)) {
+          try {
+            const raw = readFileSync(dumpPath, 'utf8');
+            records = JSON.parse(raw);
+            console.log(`   Usando dump pré-gerado: ${records.length} registros`);
+          } catch (e) {
+            console.warn('   Dump inválido ou corrompido, gerando dados em memória.');
+          }
+        }
+        // Se não tem dump ou não tem registros suficientes, gera em memória
+        const firstNames = [
+          'Ana', 'Bruno', 'Carlos', 'Daniela', 'Eduardo', 'Fernanda', 'Gabriel', 'Helena',
+          'Igor', 'Julia', 'Lucas', 'Mariana', 'Nathan', 'Olivia', 'Pedro', 'Rafaela',
+          'Samuel', 'Tatiana', 'Vitor', 'Amanda', 'Bernardo', 'Camila', 'Diego', 'Elisa',
+          'Felipe', 'Giovana', 'Henrique', 'Isabela', 'João', 'Larissa', 'Marcos', 'Natália'
+        ];
+        const lastNames = [
+          'Silva', 'Santos', 'Oliveira', 'Souza', 'Rodrigues', 'Ferreira', 'Alves', 'Pereira',
+          'Lima', 'Gomes', 'Costa', 'Ribeiro', 'Martins', 'Carvalho', 'Rocha', 'Almeida',
+          'Nascimento', 'Araújo', 'Melo', 'Barbosa', 'Cardoso', 'Dias', 'Castro', 'Campos',
+          'Teixeira', 'Moreira', 'Nunes', 'Mendes', 'Freitas', 'Cavalcanti', 'Ramos', 'Pinto'
+        ];
+        // Gera CPF válido (dígitos verificadores corretos) para fallback
+        function gerarCpfValido() {
+          const base = [];
+          for (let i = 0; i < 9; i++) base.push(Math.floor(Math.random() * 10));
+          if (new Set(base).size === 1) base[0] = (base[0] + 1) % 10;
+          let soma = 0;
+          for (let i = 0; i < 9; i++) soma += base[i] * (10 - i);
+          let d1 = (soma * 10) % 11;
+          if (d1 === 10) d1 = 0;
+          base.push(d1);
+          soma = 0;
+          for (let i = 0; i < 10; i++) soma += base[i] * (11 - i);
+          let d2 = (soma * 10) % 11;
+          if (d2 === 10) d2 = 0;
+          base.push(d2);
+          return base.join('');
+        }
+        while (records.length < toInsert) {
+          records.push({
+            name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
+            cpf: gerarCpfValido(),
+            payment_day: Math.floor(Math.random() * 31) + 1
+          });
+        }
+        records = records.slice(0, toInsert);
+
+        const fakePasswordHash = await bcrypt.hash('fake123', 10);
+        const BATCH = 1000;
+        let inserted = 0;
+
+        for (let batchStart = 0; batchStart < toInsert; batchStart += BATCH) {
+          const batchSize = Math.min(BATCH, toInsert - batchStart);
+          const names = [];
+          const emails = [];
+          const assocIds = [];
+          const paymentDays = [];
+          const cpfs = [];
+
+          for (let i = 0; i < batchSize; i++) {
+            const r = records[batchStart + i];
+            const globalIndex = currentFake + batchStart + i + 1;
+            names.push(r.name);
+            emails.push(`fake_${globalIndex}@fake.larparatodos.local`);
+            assocIds.push(associationIds[Math.floor(Math.random() * associationIds.length)]);
+            paymentDays.push(r.payment_day);
+            cpfs.push(r.cpf);
+          }
+
+          const userPlaceholders = [];
+          const userFlat = [];
+          for (let i = 0; i < batchSize; i++) {
+            const base = i * 5;
+            userPlaceholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, false, true, true, $${base + 5})`);
+            userFlat.push(names[i], emails[i], fakePasswordHash, assocIds[i], paymentDays[i]);
+          }
+          const userResult = await pool.query(
+            `INSERT INTO users (name, email, password, association_id, is_admin, is_active, fake, payment_day)
+             VALUES ${userPlaceholders.join(', ')}
+             RETURNING id`,
+            userFlat
+          );
+          const ids = userResult.rows.map((row) => row.id);
+
+          await pool.query(
+            `INSERT INTO user_profiles (user_id, cpf)
+             SELECT * FROM UNNEST($1::int[], $2::text[])`,
+            [ids, cpfs]
+          );
+
+          inserted += batchSize;
+          if (batchStart % 5000 === 0 || batchStart + batchSize >= toInsert) {
+            console.log(`   Inseridos ${inserted}/${toInsert} usuários fake...`);
+          }
+        }
+        console.log(`✅ Seed de usuários fake concluído: ${inserted} inseridos.`);
+
+        // 5b. Criar 1 ou 2 parcelas pagas por usuário fake (para balanço do admin fake)
+        const fakeUserIds = await pool.query(`
+          SELECT u.id FROM users u
+          WHERE u.fake = true
+          AND NOT EXISTS (SELECT 1 FROM payments WHERE user_id = u.id)
+          ORDER BY u.id
+        `);
+        const userIds = fakeUserIds.rows.map((r) => r.id);
+        if (userIds.length > 0) {
+          console.log(`🌱 Criando 1-2 parcelas pagas por usuário fake (${userIds.length} usuários)...`);
+          const paymentRows = [];
+          const now = new Date();
+          for (const uid of userIds) {
+            const numParcelas = Math.random() < 0.5 ? 1 : 2;
+            const baseMonth = 2 + Math.floor(Math.random() * 10); // meses atrás
+            for (let p = 0; p < numParcelas; p++) {
+              const dueDate = new Date(now.getFullYear(), now.getMonth() - baseMonth - p, 10);
+              const paidDate = new Date(dueDate);
+              paidDate.setDate(paidDate.getDate() + (Math.random() < 0.7 ? 0 : 1));
+              paymentRows.push({
+                user_id: uid,
+                amount: 150,
+                due_date: dueDate.toISOString().split('T')[0],
+                paid_date: paidDate.toISOString().split('T')[0],
+                status: 'paid'
+              });
+            }
+          }
+          const PAYMENT_BATCH = 1000;
+          for (let i = 0; i < paymentRows.length; i += PAYMENT_BATCH) {
+            const batch = paymentRows.slice(i, i + PAYMENT_BATCH);
+            const values = batch.map((b) => `(${b.user_id}, ${b.amount}, '${b.due_date}', '${b.paid_date}', '${b.status}')`).join(', ');
+            await pool.query(
+              `INSERT INTO payments (user_id, amount, due_date, paid_date, status) VALUES ${values}`
+            );
+          }
+          console.log(`✅ ${paymentRows.length} parcelas pagas criadas para usuários fake.`);
+        }
+      }
     }
 
     process.exit(0);

@@ -6,18 +6,33 @@ import { z } from 'zod';
 
 const router = express.Router();
 
+// Admin que vê apenas cadastros fake e balanço dos fakes; os demais admins veem só não-fake
+const FAKE_ADMIN_EMAIL = 'admin@larparatodoshabitacional.com.br';
+function isFakeAdmin(req) {
+  return req.user && req.user.email === FAKE_ADMIN_EMAIL;
+}
+function userScopeCondition(req) {
+  return isFakeAdmin(req) ? 'u.fake = true' : '(u.fake = false OR u.fake IS NULL)';
+}
+function userScopeConditionTable(req) {
+  return isFakeAdmin(req) ? 'fake = true' : '(fake = false OR fake IS NULL)';
+}
+
 // Todas as rotas requerem admin
 router.use(requireAdmin);
 
 // ==================== DASHBOARD E MÉTRICAS ====================
 
-// Dashboard geral com todas as métricas
+// Dashboard geral com todas as métricas (escopo: admin fake vê só fake, outros vêem só não-fake)
 router.get('/dashboard', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const userScope = userScopeCondition(req);
+    const userScopeTable = userScopeConditionTable(req);
+    const userWhere = ` AND ${userScopeTable}`;
 
-    // Métricas de usuários
+    // Métricas de usuários (exclui admins; escopo fake/não-fake)
     const [
       totalUsers,
       activeUsers,
@@ -26,15 +41,16 @@ router.get('/dashboard', async (req, res) => {
       newUsersThisMonth,
       totalAdmins,
     ] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM users'),
-      pool.query('SELECT COUNT(*) as count FROM users WHERE is_active = true'),
-      pool.query('SELECT COUNT(*) as count FROM users WHERE is_active = false'),
-      pool.query("SELECT COUNT(*) as count FROM users WHERE DATE(created_at) = $1", [today]),
-      pool.query("SELECT COUNT(*) as count FROM users WHERE DATE(created_at) >= $1", [firstDayOfMonth]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false ${userWhere}`),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND is_active = true ${userWhere}`),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND is_active = false ${userWhere}`),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND DATE(created_at) = $1 ${userWhere}`, [today]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE is_admin = false AND DATE(created_at) >= $1 ${userWhere}`, [firstDayOfMonth]),
       pool.query('SELECT COUNT(*) as count FROM users WHERE is_admin = true'),
     ]);
 
-    // Métricas de pagamentos
+    const payScope = ` FROM payments p INNER JOIN users u ON p.user_id = u.id WHERE ${userScope}`;
+    // Métricas de pagamentos (apenas de usuários no escopo)
     const [
       totalPayments,
       paidPayments,
@@ -46,34 +62,30 @@ router.get('/dashboard', async (req, res) => {
       adimplentes,
       inadimplentes,
     ] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM payments'),
-      pool.query("SELECT COUNT(*) as count FROM payments WHERE status = 'paid'"),
-      pool.query("SELECT COUNT(*) as count FROM payments WHERE status = 'pending' AND due_date >= CURRENT_DATE"),
-      pool.query("SELECT COUNT(*) as count FROM payments WHERE status = 'pending' AND due_date < CURRENT_DATE"),
-      pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid' AND DATE(paid_date) = $1", [today]),
-      pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid' AND DATE(paid_date) >= $1", [firstDayOfMonth]),
-      pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'"),
+      pool.query(`SELECT COUNT(*) as count ${payScope}`),
+      pool.query(`SELECT COUNT(*) as count ${payScope} AND p.status = 'paid'`),
+      pool.query(`SELECT COUNT(*) as count ${payScope} AND p.status = 'pending' AND p.due_date >= CURRENT_DATE`),
+      pool.query(`SELECT COUNT(*) as count ${payScope} AND p.status = 'pending' AND p.due_date < CURRENT_DATE`),
+      pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${payScope} AND p.status = 'paid' AND DATE(p.paid_date) = $1`, [today]),
+      pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${payScope} AND p.status = 'paid' AND DATE(p.paid_date) >= $1`, [firstDayOfMonth]),
+      pool.query(`SELECT COALESCE(SUM(p.amount), 0) as total ${payScope} AND p.status = 'paid'`),
       pool.query(`
-        SELECT COUNT(DISTINCT user_id) as count 
-        FROM payments 
-        WHERE user_id NOT IN (
-          SELECT DISTINCT user_id 
-          FROM payments 
-          WHERE status = 'pending' AND due_date < CURRENT_DATE
+        SELECT COUNT(DISTINCT p.user_id) as count ${payScope}
+        AND p.user_id NOT IN (
+          SELECT p2.user_id FROM payments p2 INNER JOIN users u2 ON p2.user_id = u2.id
+          WHERE p2.status = 'pending' AND p2.due_date < CURRENT_DATE AND ${userScope.replace('u.', 'u2.')}
         )
       `),
       pool.query(`
-        SELECT COUNT(DISTINCT user_id) as count 
-        FROM payments 
-        WHERE user_id IN (
-          SELECT DISTINCT user_id 
-          FROM payments 
-          WHERE status = 'pending' AND due_date < CURRENT_DATE
+        SELECT COUNT(DISTINCT p.user_id) as count ${payScope}
+        AND p.user_id IN (
+          SELECT p2.user_id FROM payments p2 INNER JOIN users u2 ON p2.user_id = u2.id
+          WHERE p2.status = 'pending' AND p2.due_date < CURRENT_DATE AND ${userScope.replace('u.', 'u2.')}
         )
       `),
     ]);
 
-    // Métricas de contatos
+    // Métricas de contatos (globais para todos os admins)
     const [
       totalContacts,
       contactsToday,
@@ -84,32 +96,22 @@ router.get('/dashboard', async (req, res) => {
       pool.query("SELECT COUNT(*) as count FROM contacts WHERE DATE(created_at) >= $1", [firstDayOfMonth]),
     ]);
 
-    // Projeções e tendências
+    // Projeções e tendências (pagamentos no escopo)
     const [
       avgPaymentValue,
       paymentsByMonth,
       revenueByMonth,
     ] = await Promise.all([
-      pool.query("SELECT COALESCE(AVG(amount), 0) as avg FROM payments WHERE status = 'paid'"),
+      pool.query(`SELECT COALESCE(AVG(p.amount), 0) as avg ${payScope} AND p.status = 'paid'`),
       pool.query(`
-        SELECT 
-          TO_CHAR(created_at, 'YYYY-MM') as month,
-          COUNT(*) as count
-        FROM payments
-        WHERE created_at >= CURRENT_DATE - INTERVAL '12 months'
-        GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-        ORDER BY month DESC
-        LIMIT 12
+        SELECT TO_CHAR(p.created_at, 'YYYY-MM') as month, COUNT(*) as count
+        ${payScope} AND p.created_at >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY TO_CHAR(p.created_at, 'YYYY-MM') ORDER BY month DESC LIMIT 12
       `),
       pool.query(`
-        SELECT 
-          TO_CHAR(paid_date, 'YYYY-MM') as month,
-          COALESCE(SUM(amount), 0) as total
-        FROM payments
-        WHERE status = 'paid' AND paid_date >= CURRENT_DATE - INTERVAL '12 months'
-        GROUP BY TO_CHAR(paid_date, 'YYYY-MM')
-        ORDER BY month DESC
-        LIMIT 12
+        SELECT TO_CHAR(p.paid_date, 'YYYY-MM') as month, COALESCE(SUM(p.amount), 0) as total
+        ${payScope} AND p.status = 'paid' AND p.paid_date >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY TO_CHAR(p.paid_date, 'YYYY-MM') ORDER BY month DESC LIMIT 12
       `),
     ]);
 
@@ -154,7 +156,7 @@ router.get('/dashboard', async (req, res) => {
 
 // ==================== GESTÃO DE USUÁRIOS ====================
 
-// Listar todos os usuários com paginação e filtros
+// Listar todos os usuários com paginação e filtros (admin fake: só fake; outros: só não-fake)
 router.get('/users', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -162,6 +164,7 @@ router.get('/users', async (req, res) => {
     const offset = (page - 1) * limit;
     const search = req.query.search || '';
     const status = req.query.status; // 'active', 'inactive', 'all'
+    const scopeWhere = ` AND ${userScopeCondition(req)}`;
 
     let query = `
       SELECT 
@@ -172,7 +175,7 @@ router.get('/users', async (req, res) => {
         (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE user_id = u.id AND status = 'paid') as total_paid
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      WHERE 1=1
+      WHERE 1=1 ${scopeWhere}
     `;
     const params = [];
     let paramCount = 1;
@@ -195,7 +198,7 @@ router.get('/users', async (req, res) => {
     const result = await pool.query(query, params);
 
     // Contar total
-    let countQuery = 'SELECT COUNT(*) as count FROM users u LEFT JOIN user_profiles up ON u.id = up.user_id WHERE 1=1';
+    let countQuery = `SELECT COUNT(*) as count FROM users u LEFT JOIN user_profiles up ON u.id = up.user_id WHERE 1=1 ${scopeWhere}`;
     const countParams = [];
     paramCount = 1;
 
@@ -228,7 +231,7 @@ router.get('/users', async (req, res) => {
   }
 });
 
-// Obter detalhes de um usuário específico
+// Obter detalhes de um usuário específico (admin fake só acessa fake; outros só não-fake)
 router.get('/users/:id', async (req, res) => {
   try {
     const userId = req.params.id;
@@ -246,9 +249,17 @@ router.get('/users/:id', async (req, res) => {
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
+    const user = userResult.rows[0];
+    const isFake = user.fake === true;
+    if (isFakeAdmin(req) && !isFake) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+    if (!isFakeAdmin(req) && isFake) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
 
     res.json({
-      user: userResult.rows[0],
+      user,
       profile: profileResult.rows[0] || null,
       payments: paymentsResult.rows,
       project: projectResult.rows[0] || null,
@@ -393,6 +404,7 @@ router.get('/reports/payments', async (req, res) => {
   try {
     const startDate = req.query.startDate || new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
     const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+    const scopeWhere = ` AND ${userScopeCondition(req)}`;
 
     const result = await pool.query(
       `SELECT 
@@ -403,7 +415,7 @@ router.get('/reports/payments', async (req, res) => {
       FROM payments p
       JOIN users u ON p.user_id = u.id
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      WHERE DATE(p.created_at) BETWEEN $1 AND $2
+      WHERE DATE(p.created_at) BETWEEN $1 AND $2 ${scopeWhere}
       ORDER BY p.created_at DESC`,
       [startDate, endDate]
     );
@@ -415,9 +427,10 @@ router.get('/reports/payments', async (req, res) => {
   }
 });
 
-// Relatório de inadimplência
+// Relatório de inadimplência (escopo fake/não-fake)
 router.get('/reports/overdue', async (req, res) => {
   try {
+    const scopeWhere = ` AND ${userScopeCondition(req)}`;
     const result = await pool.query(
       `SELECT 
         u.id,
@@ -430,7 +443,7 @@ router.get('/reports/overdue', async (req, res) => {
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
       INNER JOIN payments p ON u.id = p.user_id
-      WHERE p.status = 'pending' AND p.due_date < CURRENT_DATE
+      WHERE p.status = 'pending' AND p.due_date < CURRENT_DATE ${scopeWhere}
       GROUP BY u.id, u.name, u.email, u.phone, up.cpf
       ORDER BY total_overdue DESC`
     );
@@ -459,9 +472,10 @@ const associationSchema = z.object({
   is_default: z.boolean().optional(),
 });
 
-// Listar todas as associações (admin - inclui inativas) com métricas
+// Listar todas as associações (admin - inclui inativas) com métricas (escopo fake/não-fake)
 router.get('/associations', async (req, res) => {
   try {
+    const scopeCond = userScopeCondition(req);
     const result = await pool.query(
       `SELECT 
         a.id, a.cnpj, a.corporate_name, a.trade_name, a.email, a.phone,
@@ -475,7 +489,7 @@ router.get('/associations', async (req, res) => {
         COUNT(DISTINCT CASE WHEN p.status = 'pending' AND p.due_date < CURRENT_DATE THEN p.id END) as overdue_payments,
         COALESCE(SUM(CASE WHEN p.status = 'paid' THEN p.amount ELSE 0 END), 0) as total_revenue
       FROM associations a
-      LEFT JOIN users u ON u.association_id = a.id
+      LEFT JOIN users u ON u.association_id = a.id AND ${scopeCond}
       LEFT JOIN payments p ON p.user_id = u.id
       GROUP BY a.id
       ORDER BY a.is_default DESC, a.is_approved DESC, a.corporate_name ASC`
@@ -781,12 +795,14 @@ router.get('/associations/:id/users', async (req, res) => {
   }
 });
 
-// Métricas detalhadas de uma associação
+// Métricas detalhadas de uma associação (escopo fake/não-fake)
 router.get('/associations/:id/metrics', async (req, res) => {
   try {
     const { id } = req.params;
     const today = new Date().toISOString().split('T')[0];
     const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const scopeTable = userScopeConditionTable(req);
+    const scopeCond = userScopeCondition(req);
 
     const [
       totalUsers,
@@ -799,49 +815,49 @@ router.get('/associations/:id/metrics', async (req, res) => {
       revenueThisMonth,
       revenueTotal,
     ] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1', [id]),
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = true', [id]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND ${scopeTable}`, [id]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = true AND ${scopeTable}`, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1
+        WHERE u.association_id = $1 AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid'
+        WHERE u.association_id = $1 AND p.status = 'paid' AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date >= CURRENT_DATE
+        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date >= CURRENT_DATE AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date < CURRENT_DATE
+        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date < CURRENT_DATE AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) = $2
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) = $2 AND ${scopeCond}
       `, [id, today]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2 AND ${scopeCond}
       `, [id, firstDayOfMonth]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid'
+        WHERE u.association_id = $1 AND p.status = 'paid' AND ${scopeCond}
       `, [id]),
     ]);
 
@@ -868,7 +884,7 @@ router.get('/associations/:id/metrics', async (req, res) => {
   }
 });
 
-// Buscar usuários de uma associação
+// Buscar usuários de uma associação (segunda rota duplicada - manter escopo)
 router.get('/associations/:id/users', async (req, res) => {
   try {
     const { id } = req.params;
@@ -876,6 +892,7 @@ router.get('/associations/:id/users', async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const search = req.query.search || '';
+    const scopeWhere = ` AND ${userScopeCondition(req)}`;
 
     let query = `
       SELECT 
@@ -886,7 +903,7 @@ router.get('/associations/:id/users', async (req, res) => {
         (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE user_id = u.id AND status = 'paid') as total_paid
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      WHERE u.association_id = $1
+      WHERE u.association_id = $1 ${scopeWhere}
     `;
     const params = [id];
     let paramCount = 2;
@@ -903,7 +920,7 @@ router.get('/associations/:id/users', async (req, res) => {
     const result = await pool.query(query, params);
 
     // Contar total
-    let countQuery = 'SELECT COUNT(*) as count FROM users u LEFT JOIN user_profiles up ON u.id = up.user_id WHERE u.association_id = $1';
+    let countQuery = `SELECT COUNT(*) as count FROM users u LEFT JOIN user_profiles up ON u.id = up.user_id WHERE u.association_id = $1 ${scopeWhere}`;
     const countParams = [id];
     paramCount = 2;
 
@@ -929,12 +946,14 @@ router.get('/associations/:id/users', async (req, res) => {
   }
 });
 
-// Métricas detalhadas de uma associação
+// Métricas detalhadas de uma associação (segunda rota duplicada - escopo)
 router.get('/associations/:id/metrics', async (req, res) => {
   try {
     const { id } = req.params;
     const today = new Date().toISOString().split('T')[0];
     const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const scopeTable = userScopeConditionTable(req);
+    const scopeCond = userScopeCondition(req);
 
     const [
       totalUsers,
@@ -947,49 +966,49 @@ router.get('/associations/:id/metrics', async (req, res) => {
       revenueThisMonth,
       revenueTotal,
     ] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1', [id]),
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = true', [id]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND ${scopeTable}`, [id]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = true AND ${scopeTable}`, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1
+        WHERE u.association_id = $1 AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid'
+        WHERE u.association_id = $1 AND p.status = 'paid' AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date >= CURRENT_DATE
+        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date >= CURRENT_DATE AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date < CURRENT_DATE
+        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date < CURRENT_DATE AND ${scopeCond}
       `, [id]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) = $2
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) = $2 AND ${scopeCond}
       `, [id, today]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2 AND ${scopeCond}
       `, [id, firstDayOfMonth]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid'
+        WHERE u.association_id = $1 AND p.status = 'paid' AND ${scopeCond}
       `, [id]),
     ]);
 

@@ -16,6 +16,9 @@ RUN npm install --omit=dev
 # Copiar código fonte
 COPY . .
 
+# Gerar dump de 20k usuários fake uma vez no build (seed usa esse arquivo)
+RUN node src/database/generate-fake-users-dump.js
+
 # Expor porta
 EXPOSE 3000
 

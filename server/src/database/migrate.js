@@ -90,6 +90,7 @@ async function runMigrations() {
         association_id INTEGER REFERENCES associations(id) ON DELETE SET NULL,
         is_admin BOOLEAN DEFAULT FALSE,
         is_active BOOLEAN DEFAULT TRUE,
+        fake BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -122,6 +123,9 @@ async function runMigrations() {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='ciabra_customer_id') THEN
           ALTER TABLE users ADD COLUMN ciabra_customer_id VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='fake') THEN
+          ALTER TABLE users ADD COLUMN fake BOOLEAN DEFAULT FALSE;
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='associations' AND column_name='password') THEN
           ALTER TABLE associations ADD COLUMN password VARCHAR(255);
@@ -285,11 +289,12 @@ Ao clicar em "Aceito os Termos e Condições", você declara ter lido, compreend
     `);
     console.log('✅ Table "contacts" created/verified');
 
-    // Create index on email for faster lookups
+    // Create index on email and fake for faster lookups
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      CREATE INDEX IF NOT EXISTS idx_users_fake ON users(fake) WHERE fake = true;
     `);
-    console.log('✅ Index "idx_users_email" created/verified');
+    console.log('✅ Index "idx_users_email" and "idx_users_fake" created/verified');
 
     // Create user_profiles table
     await pool.query(`

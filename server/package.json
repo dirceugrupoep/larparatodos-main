@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "migrate": "node src/database/migrate.js",
     "seed": "node src/database/seed.js",
+    "generate-fake-dump": "node src/database/generate-fake-users-dump.js",
     "create-admin": "node src/scripts/create-admin.js",
     "generate-charges": "node src/scripts/run-monthly-charges.js",
     "check-payments": "node src/scripts/check-payment-status.js",

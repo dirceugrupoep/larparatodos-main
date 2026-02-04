@@ -19,9 +19,9 @@ export const requireAdmin = async (req, res, next) => {
     const decoded = jwt.verify(token, jwtSecret);
     req.user = decoded;
 
-    // Verificar se o usuário é admin
+    // Verificar se o usuário é admin e carregar email (para escopo fake vs real)
     const result = await pool.query(
-      'SELECT is_admin, is_active FROM users WHERE id = $1',
+      'SELECT is_admin, is_active, email FROM users WHERE id = $1',
       [decoded.id]
     );
 
@@ -30,6 +30,7 @@ export const requireAdmin = async (req, res, next) => {
     }
 
     const user = result.rows[0];
+    req.user.email = user.email;
 
     if (!user.is_active) {
       return res.status(403).json({ error: 'Conta desativada' });
