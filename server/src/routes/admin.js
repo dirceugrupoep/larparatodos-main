@@ -255,12 +255,14 @@ router.get('/users', async (req, res) => {
 
     let query = `
       SELECT 
-        u.id, u.name, u.email, u.phone, u.is_admin, u.is_active, u.created_at,
-        up.cpf, up.city, up.state,
+        u.id, u.name, u.email, u.phone, u.is_admin, u.is_active, u.created_at, u.payment_day, u.association_id,
+        a.trade_name as association_name,
+        up.cpf, up.rg, up.city, up.state, up.address, up.zip_code, up.birth_date, up.marital_status, up.occupation, up.monthly_income,
         (SELECT COUNT(*) FROM payments WHERE user_id = u.id) as total_payments,
         (SELECT COUNT(*) FROM payments WHERE user_id = u.id AND status = 'paid') as paid_payments,
         (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE user_id = u.id AND status = 'paid') as total_paid
       FROM users u
+      LEFT JOIN associations a ON u.association_id = a.id
       LEFT JOIN user_profiles up ON u.id = up.user_id
       WHERE 1=1 ${scopeWhere}
     `;
@@ -357,13 +359,25 @@ router.get('/users/:id', async (req, res) => {
   }
 });
 
-// Atualizar usuário
+// Atualizar usuário (admin pode editar qualquer dado: associação, nome, email, telefone, dia de pagamento, perfil completo)
 const updateUserSchema = z.object({
   name: z.string().min(3).max(255).optional(),
   email: z.string().email().max(255).optional(),
-  phone: z.string().max(20).optional(),
+  phone: z.string().max(20).optional().nullable(),
   is_admin: z.boolean().optional(),
   is_active: z.boolean().optional(),
+  payment_day: z.number().min(1).max(31).optional().nullable(),
+  association_id: z.number().int().positive().optional().nullable(),
+  cpf: z.string().max(14).optional().nullable(),
+  rg: z.string().max(20).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  state: z.string().max(2).optional().nullable(),
+  zip_code: z.string().max(10).optional().nullable(),
+  birth_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  marital_status: z.string().max(20).optional().nullable(),
+  occupation: z.string().max(100).optional().nullable(),
+  monthly_income: z.number().min(0).optional().nullable(),
 });
 
 router.put('/users/:id', async (req, res) => {
@@ -371,13 +385,11 @@ router.put('/users/:id', async (req, res) => {
     const userId = req.params.id;
     const validatedData = updateUserSchema.parse(req.body);
 
-    // Verificar se usuário existe
     const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
     if (userCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
 
-    // Construir query dinâmica
     const updates = [];
     const values = [];
     let paramCount = 1;
@@ -402,20 +414,57 @@ router.put('/users/:id', async (req, res) => {
       updates.push(`is_active = $${paramCount++}`);
       values.push(validatedData.is_active);
     }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    if (validatedData.payment_day !== undefined) {
+      updates.push(`payment_day = $${paramCount++}`);
+      values.push(validatedData.payment_day);
+    }
+    if (validatedData.association_id !== undefined) {
+      updates.push(`association_id = $${paramCount++}`);
+      values.push(validatedData.association_id);
     }
 
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(userId);
+    if (updates.length > 0) {
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+      values.push(userId);
+      const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+      await pool.query(query, values);
+    }
 
-    const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
-    const result = await pool.query(query, values);
+    const profileFields = ['cpf', 'rg', 'address', 'city', 'state', 'zip_code', 'birth_date', 'marital_status', 'occupation', 'monthly_income'];
+    const hasProfileData = profileFields.some((f) => validatedData[f] !== undefined);
+    if (hasProfileData) {
+      const profileResult = await pool.query('SELECT id FROM user_profiles WHERE user_id = $1', [userId]);
+      const cpf = validatedData.cpf !== undefined ? validatedData.cpf : null;
+      const rg = validatedData.rg !== undefined ? validatedData.rg : null;
+      const address = validatedData.address !== undefined ? validatedData.address : null;
+      const city = validatedData.city !== undefined ? validatedData.city : null;
+      const state = validatedData.state !== undefined ? validatedData.state : null;
+      const zip_code = validatedData.zip_code !== undefined ? validatedData.zip_code : null;
+      const birth_date = validatedData.birth_date !== undefined ? validatedData.birth_date : null;
+      const marital_status = validatedData.marital_status !== undefined ? validatedData.marital_status : null;
+      const occupation = validatedData.occupation !== undefined ? validatedData.occupation : null;
+      const monthly_income = validatedData.monthly_income !== undefined ? validatedData.monthly_income : null;
+
+      if (profileResult.rows.length > 0) {
+        await pool.query(
+          `UPDATE user_profiles SET cpf = COALESCE($1, cpf), rg = COALESCE($2, rg), address = COALESCE($3, address), city = COALESCE($4, city), state = COALESCE($5, state), zip_code = COALESCE($6, zip_code), birth_date = COALESCE($7, birth_date), marital_status = COALESCE($8, marital_status), occupation = COALESCE($9, occupation), monthly_income = COALESCE($10, monthly_income), updated_at = CURRENT_TIMESTAMP WHERE user_id = $11`,
+          [cpf, rg, address, city, state, zip_code, birth_date, marital_status, occupation, monthly_income, userId]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO user_profiles (user_id, cpf, rg, address, city, state, zip_code, birth_date, marital_status, occupation, monthly_income) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [userId, cpf || null, rg || null, address || null, city || null, state || null, zip_code || null, birth_date || null, marital_status || null, occupation || null, monthly_income || null]
+        );
+      }
+    }
+
+    const [userRow] = (await pool.query('SELECT * FROM users WHERE id = $1', [userId])).rows;
+    const [profileRow] = (await pool.query('SELECT * FROM user_profiles WHERE user_id = $1', [userId])).rows;
 
     res.json({
       message: 'Usuário atualizado com sucesso',
-      user: result.rows[0],
+      user: userRow,
+      profile: profileRow || null,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

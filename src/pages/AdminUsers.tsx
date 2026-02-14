@@ -29,9 +29,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { adminApi, AdminUser, TOTAL_PARCELAS_MESES } from '@/lib/api';
+import { adminApi, AdminUser, AdminAssociation, TOTAL_PARCELAS_MESES } from '@/lib/api';
 import { AdminLayout } from '@/components/AdminLayout';
 
 const AdminUsersPage = () => {
@@ -51,10 +58,15 @@ const AdminUsersPage = () => {
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const [editData, setEditData] = useState<Partial<AdminUser>>({});
   const [newPassword, setNewPassword] = useState('');
+  const [associations, setAssociations] = useState<AdminAssociation[]>([]);
 
   useEffect(() => {
     loadUsers();
   }, [pagination.page, search, statusFilter]);
+
+  useEffect(() => {
+    adminApi.getAssociations().then((r) => setAssociations(r.associations || [])).catch(() => {});
+  }, []);
 
   const loadUsers = async () => {
     try {
@@ -85,12 +97,25 @@ const AdminUsersPage = () => {
 
   const handleEdit = (user: AdminUser) => {
     setSelectedUser(user);
+    const birthDate = user.birth_date ? (typeof user.birth_date === 'string' ? user.birth_date.slice(0, 10) : '') : '';
     setEditData({
       name: user.name,
       email: user.email,
-      phone: user.phone,
+      phone: user.phone ?? '',
       is_admin: user.is_admin,
       is_active: user.is_active,
+      payment_day: user.payment_day ?? undefined,
+      association_id: user.association_id ?? undefined,
+      cpf: user.cpf ?? '',
+      rg: user.rg ?? '',
+      address: user.address ?? '',
+      city: user.city ?? '',
+      state: user.state ?? '',
+      zip_code: user.zip_code ?? '',
+      birth_date: birthDate || undefined,
+      marital_status: user.marital_status ?? '',
+      occupation: user.occupation ?? '',
+      monthly_income: user.monthly_income ?? undefined,
     });
     setIsEditDialogOpen(true);
   };
@@ -98,8 +123,28 @@ const AdminUsersPage = () => {
   const handleSaveEdit = async () => {
     if (!selectedUser) return;
 
+    const payload: Record<string, unknown> = {
+      name: editData.name,
+      email: editData.email,
+      phone: editData.phone || null,
+      is_admin: editData.is_admin,
+      is_active: editData.is_active,
+      payment_day: editData.payment_day !== undefined && editData.payment_day !== '' ? Number(editData.payment_day) : null,
+      association_id: editData.association_id != null ? Number(editData.association_id) : null,
+      cpf: editData.cpf || null,
+      rg: editData.rg || null,
+      address: editData.address || null,
+      city: editData.city || null,
+      state: editData.state || null,
+      zip_code: editData.zip_code || null,
+      birth_date: editData.birth_date || null,
+      marital_status: editData.marital_status || null,
+      occupation: editData.occupation || null,
+      monthly_income: editData.monthly_income != null ? Number(editData.monthly_income) : null,
+    };
+
     try {
-      await adminApi.updateUser(selectedUser.id, editData);
+      await adminApi.updateUser(selectedUser.id, payload as Partial<AdminUser>);
       toast({
         title: 'Sucesso!',
         description: 'Usuário atualizado com sucesso',
@@ -421,7 +466,7 @@ const AdminUsersPage = () => {
                 Atualize as informações do usuário
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto">
               <div>
                 <Label>Nome</Label>
                 <Input
@@ -445,12 +490,167 @@ const AdminUsersPage = () => {
                 <Label>Telefone</Label>
                 <Input
                   value={editData.phone || ''}
+                  placeholder="(11) 99999-9999"
                   onChange={(e) =>
                     setEditData({ ...editData, phone: e.target.value })
                   }
                 />
               </div>
-              <div className="flex items-center gap-4">
+              <div>
+                <Label>Associação</Label>
+                <Select
+                  value={editData.association_id != null ? String(editData.association_id) : 'none'}
+                  onValueChange={(v) =>
+                    setEditData({ ...editData, association_id: v === 'none' ? undefined : Number(v) })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Nenhuma" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhuma</SelectItem>
+                    {associations.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.trade_name || a.corporate_name || `Associação ${a.id}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Dia de pagamento (1 a 31)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  placeholder="Ex: 10"
+                  value={editData.payment_day ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditData({
+                      ...editData,
+                      payment_day: v === '' ? undefined : Math.min(31, Math.max(1, parseInt(v, 10) || 1)),
+                    });
+                  }}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Dia do mês em que o cooperado deve pagar a mensalidade
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>CPF</Label>
+                  <Input
+                    value={editData.cpf || ''}
+                    placeholder="Somente números"
+                    onChange={(e) =>
+                      setEditData({ ...editData, cpf: e.target.value })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>RG</Label>
+                  <Input
+                    value={editData.rg || ''}
+                    placeholder="Opcional"
+                    onChange={(e) =>
+                      setEditData({ ...editData, rg: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Endereço</Label>
+                <Input
+                  value={editData.address || ''}
+                  placeholder="Rua, número, bairro"
+                  onChange={(e) =>
+                    setEditData({ ...editData, address: e.target.value })
+                  }
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Cidade</Label>
+                  <Input
+                    value={editData.city || ''}
+                    onChange={(e) =>
+                      setEditData({ ...editData, city: e.target.value })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Estado (UF)</Label>
+                  <Input
+                    value={editData.state || ''}
+                    placeholder="SP"
+                    maxLength={2}
+                    onChange={(e) =>
+                      setEditData({ ...editData, state: e.target.value.toUpperCase().slice(0, 2) })
+                    }
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>CEP</Label>
+                <Input
+                  value={editData.zip_code || ''}
+                  placeholder="00000-000"
+                  onChange={(e) =>
+                    setEditData({ ...editData, zip_code: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <Label>Data de nascimento</Label>
+                <Input
+                  type="date"
+                  value={editData.birth_date || ''}
+                  onChange={(e) =>
+                    setEditData({ ...editData, birth_date: e.target.value || undefined })
+                  }
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Estado civil</Label>
+                  <Input
+                    value={editData.marital_status || ''}
+                    placeholder="Ex: Solteiro(a), Casado(a)"
+                    onChange={(e) =>
+                      setEditData({ ...editData, marital_status: e.target.value })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Ocupação</Label>
+                  <Input
+                    value={editData.occupation || ''}
+                    placeholder="Profissão"
+                    onChange={(e) =>
+                      setEditData({ ...editData, occupation: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Renda mensal (R$)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  placeholder="0,00"
+                  value={editData.monthly_income ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditData({
+                      ...editData,
+                      monthly_income: v === '' ? undefined : (parseFloat(v) || 0),
+                    });
+                  }}
+                />
+              </div>
+              <div className="flex items-center gap-4 pt-2 border-t">
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"

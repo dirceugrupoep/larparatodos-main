@@ -851,6 +851,61 @@ router.get('/charges/:charge_id', authenticateToken, async (req, res) => {
 });
 
 /**
+ * Cancelar cobrança PIX/Boleto (quando expirada) e limpar dados para permitir gerar nova
+ * POST /api/ciabra/charges/:payment_id/cancel
+ * Limpa ciabra_charge_id e dados do PIX/Boleto no pagamento; o usuário pode gerar uma nova cobrança.
+ */
+router.post('/charges/:payment_id/cancel', authenticateToken, async (req, res) => {
+  try {
+    const { payment_id } = req.params;
+    const userId = req.user.id;
+
+    const paymentResult = await pool.query(
+      'SELECT id, user_id, status, ciabra_charge_id FROM payments WHERE id = $1 AND user_id = $2',
+      [payment_id, userId]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pagamento não encontrado' });
+    }
+
+    const payment = paymentResult.rows[0];
+
+    if (payment.status !== 'pending' && payment.status !== 'overdue') {
+      return res.status(400).json({
+        error: 'Só é possível cancelar cobrança de pagamento pendente ou em atraso.',
+      });
+    }
+
+    if (!payment.ciabra_charge_id) {
+      return res.status(400).json({
+        error: 'Este pagamento não possui cobrança PIX/Boleto gerada para cancelar.',
+      });
+    }
+
+    await pool.query(
+      `UPDATE payments
+       SET ciabra_charge_id = NULL,
+           ciabra_pix_qr_code = NULL,
+           ciabra_pix_qr_code_url = NULL,
+           ciabra_boleto_url = NULL,
+           ciabra_payment_url = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND user_id = $2`,
+      [payment_id, userId]
+    );
+
+    return res.json({
+      message: 'Cobrança cancelada. Você pode gerar um novo PIX ou Boleto.',
+      paymentId: parseInt(payment_id, 10),
+    });
+  } catch (error) {
+    console.error('Erro ao cancelar cobrança:', error);
+    res.status(500).json({ error: error.message || 'Erro ao cancelar cobrança' });
+  }
+});
+
+/**
  * Buscar dados atualizados do PIX/Boleto de uma cobrança
  * GET /api/ciabra/charges/:payment_id/payment-data
  * Busca os dados atualizados do PIX/Boleto usando o ciabra_charge_id salvo no banco

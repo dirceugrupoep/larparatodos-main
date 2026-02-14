@@ -463,6 +463,25 @@ export const ciabraApi = {
 
     return response.json();
   },
+
+  async cancelCharge(paymentId: number) {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('Não autenticado');
+
+    const response = await fetch(`${API_URL}/api/ciabra/charges/${paymentId}/cancel`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Erro ao cancelar cobrança' }));
+      throw new Error(error.error || 'Erro ao cancelar cobrança');
+    }
+
+    return response.json();
+  },
 };
 
 
@@ -638,9 +657,19 @@ export interface AdminUser {
   is_admin: boolean;
   is_active: boolean;
   created_at: string;
+  payment_day?: number | null;
+  association_id?: number | null;
+  association_name?: string | null;
   cpf?: string;
+  rg?: string;
   city?: string;
   state?: string;
+  address?: string;
+  zip_code?: string;
+  birth_date?: string | null;
+  marital_status?: string | null;
+  occupation?: string | null;
+  monthly_income?: number | null;
   total_payments: number;
   paid_payments: number;
   total_paid: number;

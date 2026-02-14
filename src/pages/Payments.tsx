@@ -14,6 +14,8 @@ import {
   Receipt,
   Copy,
   ExternalLink,
+  RefreshCw,
+  XCircle,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,6 +54,8 @@ const Payments = () => {
   const [pixQrCodeUrl, setPixQrCodeUrl] = useState<string>('');
   const [boletoUrl, setBoletoUrl] = useState<string>('');
   const [paymentUrl, setPaymentUrl] = useState<string>(''); // URL do Ciabra para redirecionar
+  const [currentPixPaymentId, setCurrentPixPaymentId] = useState<number | null>(null);
+  const [cancellingCharge, setCancellingCharge] = useState<number | null>(null);
 
   useEffect(() => {
     loadData();
@@ -141,6 +145,7 @@ const Payments = () => {
           setPixQrCode(pixCode);
           setPixQrCodeUrl(pixUrl);
           setPaymentUrl(paymentPageUrl);
+          setCurrentPixPaymentId(payment.id ?? paymentId ?? null);
           setShowPixDialog(true);
           toast({
             title: 'Sucesso!',
@@ -268,6 +273,55 @@ const Payments = () => {
       title: 'Copiado!',
       description: 'Código PIX copiado para a área de transferência',
     });
+  };
+
+  const handleCancelCharge = async (paymentId: number) => {
+    try {
+      setCancellingCharge(paymentId);
+      await ciabraApi.cancelCharge(paymentId);
+      toast({
+        title: 'Cobrança cancelada',
+        description: 'Você pode gerar um novo PIX ou Boleto quando quiser.',
+      });
+      setShowPixDialog(false);
+      setCurrentPixPaymentId(null);
+      loadData();
+    } catch (e) {
+      toast({
+        title: 'Erro',
+        description: e instanceof Error ? e.message : 'Erro ao cancelar cobrança',
+        variant: 'destructive',
+      });
+    } finally {
+      setCancellingCharge(null);
+    }
+  };
+
+  const handleCancelAndGenerateNewPix = async () => {
+    if (currentPixPaymentId == null) return;
+    try {
+      setCancellingCharge(currentPixPaymentId);
+      await ciabraApi.cancelCharge(currentPixPaymentId);
+      setShowPixDialog(false);
+      setCurrentPixPaymentId(null);
+      setPixQrCode('');
+      setPixQrCodeUrl('');
+      setPaymentUrl('');
+      loadData();
+      toast({
+        title: 'PIX cancelado',
+        description: 'Gerando novo PIX...',
+      });
+      await handleCreateCharge(currentPixPaymentId, 'pix');
+    } catch (e) {
+      toast({
+        title: 'Erro',
+        description: e instanceof Error ? e.message : 'Erro ao cancelar ou gerar novo PIX',
+        variant: 'destructive',
+      });
+    } finally {
+      setCancellingCharge(null);
+    }
   };
 
   const getStatusBadge = (payment: Payment) => {
@@ -562,6 +616,7 @@ const Payments = () => {
                                   setPixQrCode(stats.nextPayment.ciabra_pix_qr_code);
                                   setPixQrCodeUrl(stats.nextPayment.ciabra_pix_qr_code_url || '');
                                   setPaymentUrl(stats.nextPayment.ciabra_payment_url || '');
+                                  setCurrentPixPaymentId(stats.nextPayment.id!);
                                   setShowPixDialog(true);
                                 } else if (stats.nextPayment.ciabra_payment_url) {
                                   window.open(stats.nextPayment.ciabra_payment_url, '_blank');
@@ -582,6 +637,25 @@ const Payments = () => {
                             >
                               <ExternalLink className="w-4 h-4 mr-1" />
                               Ver Boleto
+                            </Button>
+                          )}
+                          {/* PIX expirado: cancelar e permitir gerar novo */}
+                          {stats.nextPayment.id && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => handleCancelCharge(stats.nextPayment.id!)}
+                              disabled={cancellingCharge === stats.nextPayment.id}
+                            >
+                              {cancellingCharge === stats.nextPayment.id ? (
+                                'Cancelando...'
+                              ) : (
+                                <>
+                                  <XCircle className="w-4 h-4 mr-1" />
+                                  PIX expirado? Cancelar
+                                </>
+                              )}
                             </Button>
                           )}
                         </>
@@ -795,6 +869,7 @@ const Payments = () => {
                                     setPixQrCode(payment.ciabra_pix_qr_code);
                                     setPixQrCodeUrl(payment.ciabra_pix_qr_code_url || '');
                                     setPaymentUrl(payment.ciabra_payment_url || '');
+                                    setCurrentPixPaymentId(payment.id);
                                     setShowPixDialog(true);
                                   } else if (payment.ciabra_payment_url) {
                                     window.open(payment.ciabra_payment_url, '_blank');
@@ -818,6 +893,23 @@ const Payments = () => {
                                 Boleto
                               </Button>
                             )}
+                            {/* PIX expirado: cancelar e permitir gerar novo */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground hover:text-foreground text-xs"
+                              onClick={() => handleCancelCharge(payment.id)}
+                              disabled={cancellingCharge === payment.id}
+                            >
+                              {cancellingCharge === payment.id ? (
+                                'Cancelando...'
+                              ) : (
+                                <>
+                                  <XCircle className="w-3 h-3 mr-1" />
+                                  PIX expirado? Cancelar
+                                </>
+                              )}
+                            </Button>
                           </>
                         )}
                         <Dialog>
@@ -899,7 +991,13 @@ const Payments = () => {
         </Card>
 
         {/* PIX QR Code Dialog */}
-        <Dialog open={showPixDialog} onOpenChange={setShowPixDialog}>
+        <Dialog
+          open={showPixDialog}
+          onOpenChange={(open) => {
+            setShowPixDialog(open);
+            if (!open) setCurrentPixPaymentId(null);
+          }}
+        >
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -946,6 +1044,29 @@ const Payments = () => {
                       >
                         <ExternalLink className="w-4 h-4 mr-2" />
                         Pagar na página do Ciabra
+                      </Button>
+                    </div>
+                  )}
+                  {currentPixPaymentId != null && (
+                    <div className="pt-2 border-t border-dashed">
+                      <p className="text-xs text-muted-foreground mb-2">
+                        O PIX expira em pouco tempo. Se não pagou a tempo, cancele e gere um novo.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                        onClick={handleCancelAndGenerateNewPix}
+                        disabled={cancellingCharge === currentPixPaymentId}
+                      >
+                        {cancellingCharge === currentPixPaymentId ? (
+                          'Cancelando e gerando novo...'
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            PIX expirado? Cancelar e gerar novo
+                          </>
+                        )}
                       </Button>
                     </div>
                   )}
