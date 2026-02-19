@@ -3,6 +3,8 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../database/connection.js';
 
 const router = express.Router();
+const NON_FAKE_SCOPE = '(u.fake = false OR u.fake IS NULL)';
+const NON_FAKE_SCOPE_TABLE = '(fake = false OR fake IS NULL)';
 
 // Middleware para autenticar associação
 const authenticateAssociation = async (req, res, next) => {
@@ -59,56 +61,56 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       revenueLastMonth,
       revenueTotal,
     ] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1', [associationId]),
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = true', [associationId]),
-      pool.query('SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = false', [associationId]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND ${NON_FAKE_SCOPE_TABLE}`, [associationId]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = true AND ${NON_FAKE_SCOPE_TABLE}`, [associationId]),
+      pool.query(`SELECT COUNT(*) as count FROM users WHERE association_id = $1 AND is_active = false AND ${NON_FAKE_SCOPE_TABLE}`, [associationId]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1
+        WHERE u.association_id = $1 AND ${NON_FAKE_SCOPE}
       `, [associationId]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid'
+        WHERE u.association_id = $1 AND p.status = 'paid' AND ${NON_FAKE_SCOPE}
       `, [associationId]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date >= CURRENT_DATE
+        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date >= CURRENT_DATE AND ${NON_FAKE_SCOPE}
       `, [associationId]),
       pool.query(`
         SELECT COUNT(*) as count 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date < CURRENT_DATE
+        WHERE u.association_id = $1 AND p.status = 'pending' AND p.due_date < CURRENT_DATE AND ${NON_FAKE_SCOPE}
       `, [associationId]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) = $2
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) = $2 AND ${NON_FAKE_SCOPE}
       `, [associationId, today]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2 AND ${NON_FAKE_SCOPE}
       `, [associationId, firstDayOfMonth]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2 AND DATE(p.paid_date) <= $3
+        WHERE u.association_id = $1 AND p.status = 'paid' AND DATE(p.paid_date) >= $2 AND DATE(p.paid_date) <= $3 AND ${NON_FAKE_SCOPE}
       `, [associationId, firstDayOfLastMonth, lastDayOfLastMonth]),
       pool.query(`
         SELECT COALESCE(SUM(p.amount), 0) as total 
         FROM payments p
         JOIN users u ON p.user_id = u.id
-        WHERE u.association_id = $1 AND p.status = 'paid'
+        WHERE u.association_id = $1 AND p.status = 'paid' AND ${NON_FAKE_SCOPE}
       `, [associationId]),
     ]);
 
@@ -121,6 +123,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       JOIN users u ON p.user_id = u.id
       WHERE u.association_id = $1 
         AND p.status = 'paid'
+        AND ${NON_FAKE_SCOPE}
         AND p.paid_date >= CURRENT_DATE - INTERVAL '12 months'
       GROUP BY TO_CHAR(p.paid_date, 'YYYY-MM')
       ORDER BY month ASC
@@ -135,6 +138,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       JOIN users u ON p.user_id = u.id
       WHERE u.association_id = $1 
         AND p.status = 'paid'
+        AND ${NON_FAKE_SCOPE}
         AND p.paid_date >= CURRENT_DATE - INTERVAL '30 days'
       GROUP BY DATE(p.paid_date)
       ORDER BY date ASC
@@ -150,6 +154,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       FROM payments p
       JOIN users u ON p.user_id = u.id
       WHERE u.association_id = $1 
+        AND ${NON_FAKE_SCOPE}
         AND p.due_date >= CURRENT_DATE - INTERVAL '12 months'
       GROUP BY TO_CHAR(p.due_date, 'YYYY-MM')
       ORDER BY month ASC
@@ -162,6 +167,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
         COUNT(*) as new_users
       FROM users
       WHERE association_id = $1 
+        AND ${NON_FAKE_SCOPE_TABLE}
         AND created_at >= CURRENT_DATE - INTERVAL '12 months'
       GROUP BY TO_CHAR(created_at, 'YYYY-MM')
       ORDER BY month ASC
@@ -178,6 +184,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       FROM users u
       LEFT JOIN payments p ON p.user_id = u.id
       WHERE u.association_id = $1
+        AND ${NON_FAKE_SCOPE}
       GROUP BY u.id, u.name, u.email
       ORDER BY total_paid DESC
       LIMIT 10
@@ -194,6 +201,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       SELECT COUNT(*) as count 
       FROM users 
       WHERE association_id = $1 
+        AND ${NON_FAKE_SCOPE_TABLE}
         AND created_at >= $2
     `, [associationId, firstDayOfMonth]);
 
@@ -201,6 +209,7 @@ router.get('/metrics', authenticateAssociation, async (req, res) => {
       SELECT COUNT(*) as count 
       FROM users 
       WHERE association_id = $1 
+        AND ${NON_FAKE_SCOPE_TABLE}
         AND created_at >= $2 AND created_at <= $3
     `, [associationId, firstDayOfLastMonth, lastDayOfLastMonth]);
 
@@ -268,6 +277,7 @@ router.get('/users', authenticateAssociation, async (req, res) => {
       LEFT JOIN user_profiles up ON u.id = up.user_id
       LEFT JOIN payments p ON p.user_id = u.id
       WHERE u.association_id = $1
+        AND ${NON_FAKE_SCOPE}
     `;
     const params = [associationId];
     let paramCount = 2;
@@ -288,6 +298,7 @@ router.get('/users', authenticateAssociation, async (req, res) => {
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
       WHERE u.association_id = $1
+        AND ${NON_FAKE_SCOPE}
     `;
     const countParams = [associationId];
     paramCount = 2;
@@ -335,6 +346,7 @@ router.get('/reports', authenticateAssociation, async (req, res) => {
       FROM payments p
       JOIN users u ON p.user_id = u.id
       WHERE u.association_id = $1
+        AND ${NON_FAKE_SCOPE}
         AND p.due_date >= $2
         AND p.due_date <= $3
       ORDER BY p.due_date DESC
@@ -352,6 +364,7 @@ router.get('/reports', authenticateAssociation, async (req, res) => {
       FROM payments p
       JOIN users u ON p.user_id = u.id
       WHERE u.association_id = $1
+        AND ${NON_FAKE_SCOPE}
         AND p.due_date >= $2
         AND p.due_date <= $3
     `, [associationId, startDate, endDate]);
@@ -375,6 +388,7 @@ router.get('/reports', authenticateAssociation, async (req, res) => {
       LEFT JOIN user_profiles up ON u.id = up.user_id
       LEFT JOIN payments p ON p.user_id = u.id
       WHERE u.association_id = $1
+        AND ${NON_FAKE_SCOPE}
       GROUP BY u.id, up.cpf, up.city, up.state
       ORDER BY u.created_at DESC
     `, [associationId]);

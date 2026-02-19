@@ -984,6 +984,27 @@ export const adminApi = {
       return response.json();
     },
 
+    async resetAssociationPassword(id: number, newPassword: string): Promise<{ message: string }> {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('Não autenticado');
+
+      const response = await fetch(`${API_URL}/api/admin/associations/${id}/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ newPassword }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Erro ao resetar senha da associação');
+      }
+
+      return response.json();
+    },
+
     async getAssociationUsers(id: number, params?: { page?: number; limit?: number; search?: string }): Promise<{
       users: AdminUser[];
       pagination: {

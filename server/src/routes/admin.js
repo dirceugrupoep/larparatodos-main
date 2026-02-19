@@ -990,6 +990,40 @@ router.put('/associations/:id', async (req, res) => {
   }
 });
 
+// Resetar senha da associação
+router.post('/associations/:id/reset-password', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const result = await pool.query(
+      `UPDATE associations 
+       SET password = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING id, corporate_name, trade_name, email`,
+      [hashedPassword, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Associação não encontrada' });
+    }
+
+    res.json({
+      message: 'Senha da associação resetada com sucesso',
+      association: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Reset association password error:', error);
+    res.status(500).json({ error: 'Erro ao resetar senha da associação' });
+  }
+});
+
 // Aprovar/Rejeitar associação
 router.post('/associations/:id/approve', async (req, res) => {
   try {
@@ -1056,6 +1090,7 @@ router.get('/associations/:id/users', async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const search = req.query.search || '';
+    const scopeWhere = ` AND ${userScopeCondition(req)}`;
 
     let query = `
       SELECT 
@@ -1066,7 +1101,7 @@ router.get('/associations/:id/users', async (req, res) => {
         (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE user_id = u.id AND status = 'paid') as total_paid
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      WHERE u.association_id = $1
+      WHERE u.association_id = $1 ${scopeWhere}
     `;
     const params = [id];
     let paramCount = 2;
@@ -1083,7 +1118,7 @@ router.get('/associations/:id/users', async (req, res) => {
     const result = await pool.query(query, params);
 
     // Contar total
-    let countQuery = 'SELECT COUNT(*) as count FROM users u LEFT JOIN user_profiles up ON u.id = up.user_id WHERE u.association_id = $1';
+    let countQuery = `SELECT COUNT(*) as count FROM users u LEFT JOIN user_profiles up ON u.id = up.user_id WHERE u.association_id = $1 ${scopeWhere}`;
     const countParams = [id];
     paramCount = 2;
 

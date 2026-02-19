@@ -18,6 +18,7 @@ import {
   Eye,
   Power,
   Clock,
+  Key,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,6 +48,9 @@ const AdminAssociationsPage = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedAssociation, setSelectedAssociation] = useState<AdminAssociation | null>(null);
+  const [selectedAssociationForPassword, setSelectedAssociationForPassword] = useState<AdminAssociation | null>(null);
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
   const [formData, setFormData] = useState({
     cnpj: '',
     corporate_name: '',
@@ -186,6 +190,41 @@ const AdminAssociationsPage = () => {
       toast({
         title: 'Erro',
         description: error instanceof Error ? error.message : 'Erro ao alterar status',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleOpenResetPassword = (association: AdminAssociation) => {
+    setSelectedAssociationForPassword(association);
+    setNewPassword('');
+    setIsPasswordDialogOpen(true);
+  };
+
+  const handleResetAssociationPassword = async () => {
+    if (!selectedAssociationForPassword) return;
+
+    if (newPassword.length < 6) {
+      toast({
+        title: 'Erro',
+        description: 'A senha deve ter pelo menos 6 caracteres',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await adminApi.resetAssociationPassword(selectedAssociationForPassword.id, newPassword);
+      toast({
+        title: 'Sucesso!',
+        description: `Senha da associação ${selectedAssociationForPassword.trade_name || selectedAssociationForPassword.corporate_name} resetada com sucesso`,
+      });
+      setIsPasswordDialogOpen(false);
+      setNewPassword('');
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Erro ao resetar senha da associação',
         variant: 'destructive',
       });
     }
@@ -477,6 +516,14 @@ const AdminAssociationsPage = () => {
                         <Edit className="w-4 h-4 mr-2" />
                         Editar
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenResetPassword(association)}
+                      >
+                        <Key className="w-4 h-4 mr-2" />
+                        Resetar Senha
+                      </Button>
                       {!association.is_default && (
                         <Button
                           variant="destructive"
@@ -610,6 +657,32 @@ const AdminAssociationsPage = () => {
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={isPasswordDialogOpen} onOpenChange={setIsPasswordDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Resetar senha da associação</DialogTitle>
+              <DialogDescription>
+                Defina a nova senha para{' '}
+                {selectedAssociationForPassword?.trade_name || selectedAssociationForPassword?.corporate_name || 'a associação selecionada'}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label>Nova Senha</Label>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+              <Button onClick={handleResetAssociationPassword} className="w-full">
+                Confirmar reset de senha
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminLayout>
   );
